@@ -1,0 +1,21 @@
+lib
+  - proof suitable for deletion (uses witnessLeafs instead of witnesses where necessary)
+  - optionally track keys
+  - gc
+    - compact tree to ensure node Ids are inserted sequentially
+  - try putting leaves in their own node key-space to improve locality of interior nodes
+  ? maybe way to avoid needing lmdb storage to validate a proof, etc?
+  ? ability to set resource limits on proof sizes when verifying (setMaxProofCmds?)
+
+quadb tool
+  - list heads
+  - reflog
+  - iterate over keys, if tracked
+
+solidity impl
+
+docs
+  - two reasons to hash val in leafs: guarantee sizeof(leaf) != sizeof(node), and make it so you don't need to provide potentially large vals during non-existence proofs
+  - key hash suffixes of empty witnesses are 0'd out: optimization for evm
+  - adversarial proof bloating
+    - mine 2 values with common N-bit prefix (can use birthday attacks)

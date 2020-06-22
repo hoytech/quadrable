@@ -1,0 +1,55 @@
+W        = -Wall
+OPT      = -O2 -g
+STD      = -std=c++17
+CXXFLAGS = $(STD) $(OPT) $(W) -fPIC $(XCXXFLAGS)
+INCS     = -Iinclude -Iexternal -Iexternal/hoytech-cpp
+
+LDLIBS   = -l:liblmdb.a -pthread
+TOOL_LDLIBS = -ldocopt
+LDFLAGS  = -flto $(XLDFLAGS)
+
+CHECK_SRCS     = check.cpp external/hoytech-cpp/hex.cpp
+TOOL_SRCS     = quadb.cpp external/hoytech-cpp/hex.cpp
+
+
+CHECK_OBJS    := $(CHECK_SRCS:.cpp=.o)
+TOOL_OBJS    := $(TOOL_SRCS:.cpp=.o)
+DEPS    := $(CHECK_SRCS:.cpp=.d) $(TOOL_SRCS:.cpp=.d)
+
+
+.PHONY: phony
+
+all: phony quadb check
+
+check: $(CHECK_OBJS) $(DEPS)
+	$(CXX) $(CHECK_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+
+quadb: $(TOOL_OBJS) $(DEPS)
+	$(CXX) $(TOOL_OBJS) $(LDFLAGS) $(LDLIBS) $(TOOL_LDLIBS) -o $@
+
+%.o : %.cpp %.d
+	$(CXX) $(CXXFLAGS) $(INCS) -MMD -MP -MT $@ -MF $*.d -c $< -o $@
+
+-include *.d
+
+%.d : ;
+
+clean: phony
+	rm -rf quadb check *.o *.d testdb/ *.gcda *.gcno coverage.lcov coverage-report/
+
+run-check: phony check
+	mkdir -p testdb/
+	rm -f testdb/*.mdb
+	time ./check
+
+test: XCXXFLAGS += -fsanitize=address
+test: XLDFLAGS += -fsanitize=address
+test: phony run-check
+
+
+coverage: XCXXFLAGS += --coverage
+coverage: XLDFLAGS += --coverage
+coverage: phony clean run-check
+	lcov --directory . --capture --output-file coverage.lcov
+	mkdir -p coverage-report
+	genhtml coverage.lcov --output-directory coverage-report

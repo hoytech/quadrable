@@ -1,0 +1,6 @@
+[submodule "external/hoytech-cpp"]
+	path = external/hoytech-cpp
+	url = https://github.com/hoytech/hoytech-cpp.git
+[submodule "external/lmdbxx"]
+	path = external/lmdbxx
+	url = https://github.com/hoytech/lmdbxx.git

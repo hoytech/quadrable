@@ -1,0 +1,12 @@
+*.o
+*.d
+/check
+/quadb
+
+/db/
+/testdb/
+
+*.gcda
+*.gcno
+coverage.lcov
+/coverage-report/
