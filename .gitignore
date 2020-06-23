@@ -3,7 +3,7 @@
 /check
 /quadb
 
-/db/
+/quadb-dir/
 /testdb/
 
 *.gcda

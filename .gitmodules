@@ -4,3 +4,6 @@
 [submodule "external/lmdbxx"]
 	path = external/lmdbxx
 	url = https://github.com/hoytech/lmdbxx.git
+[submodule "external/docopt.cpp"]
+	path = external/docopt.cpp
+	url = https://github.com/docopt/docopt.cpp.git

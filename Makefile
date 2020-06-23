@@ -2,10 +2,9 @@ W        = -Wall
 OPT      = -O2 -g
 STD      = -std=c++17
 CXXFLAGS = $(STD) $(OPT) $(W) -fPIC $(XCXXFLAGS)
-INCS     = -Iinclude -Iexternal -Iexternal/hoytech-cpp
+INCS     = -Iinclude -Iexternal -Iexternal/hoytech-cpp -Iexternal/docopt.cpp
 
 LDLIBS   = -l:liblmdb.a -pthread
-TOOL_LDLIBS = -ldocopt
 LDFLAGS  = -flto $(XLDFLAGS)
 
 CHECK_SRCS     = check.cpp external/hoytech-cpp/hex.cpp
@@ -25,10 +24,12 @@ check: $(CHECK_OBJS) $(DEPS)
 	$(CXX) $(CHECK_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 quadb: $(TOOL_OBJS) $(DEPS)
-	$(CXX) $(TOOL_OBJS) $(LDFLAGS) $(LDLIBS) $(TOOL_LDLIBS) -o $@
+	$(CXX) $(TOOL_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 %.o : %.cpp %.d
 	$(CXX) $(CXXFLAGS) $(INCS) -MMD -MP -MT $@ -MF $*.d -c $< -o $@
+
+quadb.o: XCXXFLAGS += -DDOCOPT_HEADER_ONLY
 
 -include *.d
 

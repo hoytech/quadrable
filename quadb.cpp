@@ -1,25 +1,40 @@
+#include <stdlib.h> // getenv
+#include <unistd.h> // access
+#include <string.h> // strerror
+#include <errno.h> // strerror
+#include <sys/stat.h> // mkdir
+#include <sys/types.h> // mkdir
+
 #include <iostream>
 #include <random>
 
-#include <docopt/docopt.h>
+#include <docopt.h>
 
 #include "quadrable.h"
 #include "quadrable/utils.h"
 
 
+using quadrable::quaderr;
+
 
 static const char USAGE[] =
 R"(
     Usage:
-      quadb [--db=<dir>] dump
-      quadb [--db=<dir>] put <key> <val>
-      quadb [--db=<dir>] proof <key>
-      quadb mineHash <prefix>
+      quadb [options] init
+      quadb [options] put <key> <val>
+      quadb [options] get <key>
+      quadb [options] status
+      quadb [options] proof <key>
+    #
+    # Development/testing
+    #
+      quadb [options] dump
+      quadb [options] mineHash <prefix>
 
     Options:
-      --db=<dir>            LMDB dir
-      -h --help             Show this screen.
-      --version             Show version.
+      --db=<dir>  Database directory (default $ENV{QUADB_DIR} || "./quadb-dir/")
+      -h --help   Show this screen.
+      --version   Show version.
 )";
 
 
@@ -32,8 +47,28 @@ void parse_command_line(int argc, char **argv) {
 
     if (args["--db"]) {
         dbDir = args["--db"].asString();
+    } else if (getenv("QUADB_DIR")) {
+        dbDir = std::string(getenv("QUADB_DIR"));
     } else {
-        dbDir = "./db/";
+        dbDir = "./quadb-dir";
+    }
+
+    dbDir += "/";
+
+    if (access(dbDir.c_str(), F_OK)) {
+        if (args["init"].asBool()) {
+            if (mkdir(dbDir.c_str(), 0755)) throw quaderr("Unable to create directory '", dbDir, "': ", strerror(errno));
+        } else {
+            throw quaderr("Could not access directory '", dbDir, "': ", strerror(errno));
+        }
+    } else {
+        std::string dbFile = dbDir + "data.mdb";
+
+        if (access(dbDir.c_str(), F_OK)) {
+            throw quaderr("Directory '", dbDir, "' not init'ed");
+        } else {
+            if (args["init"].asBool()) throw quaderr("Directory '", dbDir, "' already init'ed");
+        }
     }
 
 
@@ -60,13 +95,21 @@ void parse_command_line(int argc, char **argv) {
     auto txn = lmdb::txn::begin(lmdb_env, nullptr, 0);
 
 
-    if (args["dump"].asBool()) {
+    if (args["init"].asBool()) {
+        std::cout << "Quadrable directory init'ed: " << dbDir << std::endl;
+    } else if (args["dump"].asBool()) {
         quadrable::dumpDb(db, txn);
     } else if (args["put"].asBool()) {
         std::string k = args["<key>"].asString();
         std::string v = args["<val>"].asString();
 
         db.change().put(k, v).apply(txn);
+    } else if (args["get"].asBool()) {
+        std::string k = args["<key>"].asString();
+        std::string_view v;
+        if (!db.get(txn, k, v)) throw quaderr("key not found in db");
+        std::cout << v << std::endl;
+    } else if (args["status"].asBool()) {
     } else if (args["proof"].asBool()) {
         std::string k = args["<key>"].asString();
         // FIXME
@@ -108,7 +151,7 @@ int main(int argc, char **argv) {
     try {
         parse_command_line(argc, argv);
     } catch (std::exception &e) {
-        std::cerr << "CAUGHT EXCEPTION, ABORTING: " << e.what() << std::endl;
+        std::cerr << "quadb error: " << e.what() << std::endl;
         ::exit(1);
     }
 
