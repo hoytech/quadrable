@@ -418,7 +418,7 @@ class Quadrable {
         detachedHeadNodeId = nodeId;
     }
 
-    void checkout(std::string newHead) {
+    void checkout(std::string_view newHead) {
         head = newHead;
         detachedHead = false;
     }

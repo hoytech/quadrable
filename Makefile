@@ -29,7 +29,7 @@ quadb: $(TOOL_OBJS) $(DEPS)
 %.o : %.cpp %.d
 	$(CXX) $(CXXFLAGS) $(INCS) -MMD -MP -MT $@ -MF $*.d -c $< -o $@
 
-quadb.o: XCXXFLAGS += -DDOCOPT_HEADER_ONLY
+quadb.o: XCXXFLAGS += -DDOCOPT_HEADER_ONLY -DQUADRABLE_VERSION='"'`git describe --tags`'"'
 
 -include *.d
 
