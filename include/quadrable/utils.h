@@ -13,6 +13,11 @@ using hoytech::to_hex;
 namespace quadrable {
 
 
+static inline std::string renderUnknown(std::string_view hash) {
+    return std::string("H(?)=0x") + to_hex(hash.substr(0, 6)) + "...";
+}
+
+
 static inline void dumpDbAux(quadrable::Quadrable &db, lmdb::txn &txn, uint64_t nodeId, size_t depth) {
     quadrable::ParsedNode node(txn, db.dbi_node, nodeId);
 

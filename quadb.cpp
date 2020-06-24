@@ -24,6 +24,8 @@ R"(
       quadb [options] put <key> <val>
       quadb [options] del <key>
       quadb [options] get <key>
+      quadb [options] list
+      quadb [options] stats
       quadb [options] status
       quadb [options] head
       quadb [options] head rm <head>
@@ -84,15 +86,15 @@ void parse_command_line(int argc, char **argv) {
 
     lmdb_env.reader_check();
 
+
     quadrable::Quadrable db;
 
 
-    lmdb::dbi dbi_quadb_state;
 
     auto txn = lmdb::txn::begin(lmdb_env, nullptr, 0);
-    db.init(txn);
 
-    dbi_quadb_state = lmdb::dbi::open(txn, "quadrable_quadb_state", MDB_CREATE);
+    db.init(txn);
+    lmdb::dbi dbi_quadb_state = lmdb::dbi::open(txn, "quadrable_quadb_state", MDB_CREATE);
 
 
 
@@ -159,6 +161,21 @@ void parse_command_line(int argc, char **argv) {
                 std::cout << e.head << " : " << e.nodeId << std::endl;
             }
         }
+    } else if (args["list"].asBool()) {
+        db.walkTree(txn, [&](quadrable::ParsedNode &node, uint64_t depth){
+            if (!node.isLeaf()) return;
+
+            std::cout << quadrable::renderUnknown(node.leafKeyHash());
+
+            std::cout << " -> ";
+
+            if (node.nodeType == quadrable::NodeType::Leaf) std::cout << node.leafVal();
+            else std::cout << quadrable::renderUnknown(node.leafValHash());
+
+            std::cout << "\n";
+        });
+
+        std::cout << std::flush;
     } else if (args["checkout"].asBool()) {
         if (args["<head>"]) {
             std::string newHead = args["<head>"].asString();
@@ -181,6 +198,8 @@ void parse_command_line(int argc, char **argv) {
             db.fork(txn);
             dbi_quadb_state.del(txn, "currHead");
         }
+    } else if (args["stats"].asBool()) {
+        quadrable::dumpStats(db, txn);
     } else if (args["status"].asBool()) {
         if (db.isDetachedHead()) {
             std::cout << "Detached head" << std::endl;

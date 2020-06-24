@@ -1007,35 +1007,40 @@ class Quadrable {
     Stats stats(lmdb::txn &txn) {
         Stats output;
 
-        auto nodeId = getHeadNodeId(txn);
+        walkTree(txn, [&](ParsedNode &node, uint64_t depth){
+            output.numNodes++;
+            output.maxDepth = std::max(output.maxDepth, depth);
+            output.numBytes += node.raw.size();
 
-        statsAux(txn, nodeId, 0, output);
+            if (node.nodeType == NodeType::Leaf) {
+                output.numLeafNodes++;
+            } else if (node.isBranch()) {
+                output.numBranchNodes++;
+            } else if (node.isWitness()) {
+                output.numWitnessNodes++;
+            }
+        });
 
         return output;
     }
 
-    void statsAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth, Stats &output) {
+    void walkTree(lmdb::txn &txn, std::function<void(ParsedNode &, uint64_t)> cb) {
+        auto nodeId = getHeadNodeId(txn);
+        walkTreeAux(txn, cb, nodeId, 0);
+    }
+
+    void walkTreeAux(lmdb::txn &txn, std::function<void(ParsedNode &, uint64_t)> cb, uint64_t nodeId, uint64_t depth) {
         ParsedNode node(txn, dbi_node, nodeId);
 
         if (node.nodeType == NodeType::Empty) return;
 
-        output.numNodes++;
-        output.maxDepth = std::max(output.maxDepth, depth);
-        output.numBytes += node.raw.size();
+        cb(node, depth);
 
-        if (node.nodeType == NodeType::Leaf) {
-            output.numLeafNodes++;
-        } else if (node.isBranch()) {
-            output.numBranchNodes++;
-
+        if (node.isBranch()) {
             checkDepth(depth);
 
-            statsAux(txn, node.leftNodeId, depth+1, output);
-            statsAux(txn, node.rightNodeId, depth+1, output);
-        } else if (node.isWitness()) {
-            output.numWitnessNodes++;
-        } else {
-            throw quaderr("unrecognized nodeType: ", int(node.nodeType));
+            walkTreeAux(txn, cb, node.leftNodeId, depth+1);
+            walkTreeAux(txn, cb, node.rightNodeId, depth+1);
         }
     }
 
