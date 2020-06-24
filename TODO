@@ -8,6 +8,7 @@ lib
   ? ability to set resource limits on proof sizes when verifying (setMaxProofCmds?)
 
 quadb tool
+  - quadb load (loads comma-separated values from stdin)
   - reflog
   - iterate over keys, if tracked
 

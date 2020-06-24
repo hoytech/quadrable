@@ -50,7 +50,7 @@ This is the complement to `put`, and is used to retrieve previously set values:
 
 An error will be thrown if you try to get a key that is not present in the tree:
 
-    $ ./quadb get no-such-key
+    $ quadb get no-such-key
     quadb error: key not found in db
 
 ### quadb del
@@ -66,6 +66,55 @@ If we run `status` again, we can see the root has changed back the all-zeros val
     Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
 This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order records are inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting root.
+
+### quadb head
+
+A database can have many heads. You can view the list of heads with the `head` command:
+
+    $ quadb head
+    => master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
+
+The `=>` arrow indicates the current head. The heads are sorted by `nodeId` (the number in parentheses), so the most recently updates heads will appear at the top.
+
+The `head rm` command can be used to delete a head:
+
+    $ quadb head rm master
+
+### quadb checkout
+
+The `checkout` command can be used to change the current head. If we switch to a brand-new head, then this head will start out as the empty tree. For example, let's switch to a new head called `temp`. On success there is no output:
+
+    $ quadb checkout temp
+
+Note that this new head will not appear in the `quadb head` list until we have done completed a write operation on this head, like so:
+
+    $ quadb put tempKey tempVal
+    $ quadb head
+    => temp : 0x11bf4b644c4ad1c9e18a96c1f35cdd161941d2355742aaa3577dcefef0382a16 (2)
+       master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
+
+Note that the `tempKey` record that we just inserted only exists in the `temp` head, and if we switched back to master it would not be visible.
+
+Running `quadb checkout` with no head name will result in a detached head pointing to a new, empty head (see FIXME).
+
+### quadb fork
+
+When we created a new head with checkout, it was initialized to an empty tree. Instead, we may choose to use `fork` to copy the current head to the new head:
+
+    $ quadb fork temp2
+    $ ./quadb head
+       temp : 0x11bf4b644c4ad1c9e18a96c1f35cdd161941d2355742aaa3577dcefef0382a16 (2)
+    => temp2 : 0x11bf4b644c4ad1c9e18a96c1f35cdd161941d2355742aaa3577dcefef0382a16 (2)
+       master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
+
+Our new `temp2` head starts off with the same root as `temp`. We can now modify `temp2` and it will not affect the `temp` tree.
+
+Although semantically `fork` acts like it copies the tree pointed to by the current head, no copying actually occurs. In fact, the two trees share the same structure so forking is a very inexpensive operation. Very cheap database snapshots is an important feature of Quadrable, and is useful for a variety of tasks.
+
+`quadb fork` can take a second argument which represents the head to be copied from, instead of using the current head.
+
+It can also take no arguments at, in which case the current head is forked to a detached head (see FIXME).
+
 
 ## C++ Library
 
