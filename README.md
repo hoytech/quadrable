@@ -92,7 +92,7 @@ If we run `status` again, we can see the root has changed back to the all-zeros 
     Head: master
     Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
-This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order records are inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting root.
+This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order in which records were inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting roots.
 
 ### quadb head
 
@@ -154,9 +154,9 @@ Suppose you'd like to update two keys in the DB. You can do this by calling the 
     db.put(txn, "key1", "val1");
     db.put(txn, "key2", "val2");
 
-However, this is not optimal. Each call to `put` must traverse the DB tree to find the location where the updated value should live, and then construct new nodes along the entire path back to the root.
+However, this is not optimal. Each call to `put` must traverse the DB tree to find the location where the updated value should live, and then construct new nodes along the entire path back to the root. If the hashes of the values share any common prefix bits, then intermediate nodes created by the first `put` will be thrown away and recreated by the second `put`. At the very least, a root node will be created and thrown away.
 
-It is more efficient to use the `change()` method, which returns an `UpdateSet`, make the desired changes on this temporary object, and then `apply()` it to the database:
+Instead, it is more efficient to use the `change()` method, which returns an `UpdateSet`, make the desired changes on this temporary object, and then `apply()` it to the database:
 
     db.change()
       .put("key1", "val1")
@@ -181,20 +181,20 @@ So instead of:
     bool key2Exists = db.get(txn, "key2", key2Val);
     if (key1Exists) std::cout << key1Val;
 
-Use the following to avoid an additional tree traversal:
+Use the following to avoid unnecessary tree traversals:
 
     auto recs = db.get(txn, { "key1", "key2", });
     if (recs["key1"].exists) std::cout << recs["key1"].val;
 
 **Important**: In both of the above cases, the values are `string_view`s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort. If you need to keep them around longer, copy them into a string:
 
-    auto key1ValCopy = std::string(key1Val);
+    std::string key1ValCopy(recs["key1"].val);
 
 
 
 
 ## Author and Copyright
 
-Quadrable is ©2020 Doug Hoyte.
+Quadrable © 2020 Doug Hoyte.
 
 It is licensed under the 2-clause BSD license. See the LICENSE file for details.
