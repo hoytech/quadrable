@@ -4,16 +4,41 @@ Quadrable is an authenticated multi-version database built on top of a sparse bi
 
 
 
+## Building
+
+### Dependencies
+
+    sudo apt install -y liblmdb-dev
+
+### Compilation
+
+Clone the repo, `cd` into it, and run these commands:
+
+    git submodule update --init
+    make
+
+
+
 ## Command-line
 
 The `quadb` command can be used to interact with a Quadrable database. It is very roughly modeled after `git`, so it requires sub-commands to activate its various functions. You can run `quadb` with no arguments to see a short help summary and a list of the available sub-commands.
 
 ### quadb init
 
-Before you can use any other commands, you must initialise a directory to contain the Quadrable database:
+Before you can use any other commands, you must initialise a directory to contain the Quadrable database. By default it inits `./quadb-dir/`:
 
     $ quadb init
     Quadrable directory init'ed: ./quadb-dir/
+
+You can specify an alternate directory with the `--db` flag:
+
+    $ quadb --db=$HOME/.quadrable init
+    Quadrable directory init'ed: /home/doug/.quadrable/
+
+Or the `QUADB_DIR` environment variable:
+
+    $ QUADB_DIR=/path/to/quadrable quadb init
+    Quadrable directory init'ed: /path/to/quadrable
 
 ### quadb status
 
