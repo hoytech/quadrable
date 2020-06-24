@@ -6,13 +6,13 @@ Quadrable is an authenticated multi-version embedded database based on a sparse 
 
 * *Authenticated*: The entire state of the database can be digested down to a 32-byte value, known as the "root". This represents the entire contents of the database, and any modifications will change this root. Furthermore, anyone who knows the root value but does not have a copy of the database can perform queries on the database remotely, so long as somebody provides "proofs" along with the results. These proofs are compared against the root to authenticate the query results.
 * *Multi-version*: Many different versions of the database can exist at the same time. Versions that are derived from other versions don't result in the entire database being copied. Instead, all of the database that is common between the versions is shared, in a copy-on-write manner. With this functionality, database snapshots or checkpoints are very inexpensive so they can be used liberally, and for many purposes.
-* *Embedded*: The main functionality exists in a C++ library that is intended to be used by applications, such as the included command-line application `quadb`. Quadrable uses [LMDB](https://lmdb.tech), which is an efficient database library that embeds the database into your process by memory-mapping a file.
+* *Embedded*: The main functionality exists in a C++ header-only library intended to be used by applications such as the `quadb` command-line tool. Quadrable uses [LMDB](https://symas.com/lmdb/), an efficient database library which embeds the entire database into your process by memory-mapping a file.
 
-Although not necessary for simple usage, it can help to understand the data-structure used by Quadrature:
+Although not necessary for simple usage, it can help to understand the core data-structure used by Quadrable:
 
-* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in the same way to create a smaller set of intermediate nodes, and this continues until a single node is left, which is called the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
-* *Binary*: This style of merkle tree combines together exactly two nodes to create the node in the next layer. There are alternative merkle tree designs such as radix trees, AVL trees, or tries, but they are much more complicated to implement and typically have a much larger authentication overhead (proof size). With a few optimisations and attention to implementation detail, binary merkle trees can enjoy almost all the benefits of these more complicated designs, as we will describe in FIXME.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. The consequence of this is that keys must be "dense" (without gaps), for example the sequence of integers from 1 to N. This opens the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable solves this by using a sparse merkle tree structure, where there *is* a concept of an empty leaf, and keys can be anywhere inside a large (256-bit) keyspace.
+* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in the same way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is called the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication. See my presentation on merkle trees for a detailed overview FIXME: link.
+* *Binary*: This style of merkle tree combines together exactly two nodes to create the node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, or tries, but they are more complicated to implement and typically have a larger authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees can enjoy almost all the benefits of these more complicated designs, as described in FIXME.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. The consequence of this is that keys must be in sequence 1 through N (with no gaps). This opens the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and keys can be anywhere inside a large (256-bit) keyspace.
 
 
 ## Building
@@ -38,7 +38,7 @@ The `quadb` command can be used to interact with a Quadrable database. It is ver
 
 ### quadb init
 
-Before you can use any other commands, you must initialise a directory to contain the Quadrable database. By default it inits `./quadb-dir/`:
+Before you can use other commands, you must initialise a directory to contain the Quadrable database. By default it inits `./quadb-dir/`:
 
     $ quadb init
     Quadrable directory init'ed: ./quadb-dir/
@@ -73,7 +73,7 @@ This adds a new record to the database, or updates an existing one. On success t
 
     $ quadb put key val
 
-Unless the value was the same as a previously existing one, the current head will be updated to have a new root:
+Unless the value was the same as a previously existing one, the current head will be updated to have a new root, and a new nodeId will be allocated for it:
 
     $ quadb status
     Head: master
@@ -107,14 +107,14 @@ This is an important property of Quadrable: Identical trees have identical roots
 
 ### quadb head
 
-A database can have many heads. You can view the list of heads with the `head` command:
+A database can have many heads. You can view the list of heads with `quadb head`:
 
     $ quadb head
     => master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
-The `=>` arrow indicates that `master` is the current head. The heads are sorted by `nodeId` (the number in parentheses), so the most recently updated heads will appear at the top.
+The `=>` arrow indicates that `master` is the current head. The heads are sorted by `nodeId` (the number in parentheses), so the most recently updated heads will appear at the top (except for empty trees, which always have a nodeId of 0).
 
-The `head rm` command can be used to delete a head (or do nothing if it doesn't exist):
+`head rm` deletes a head (or does nothing if the head doesn't exist):
 
     $ quadb head rm headToRemove
 
@@ -131,13 +131,13 @@ This new head will not appear in the `quadb head` list until we have completed a
     => temp : 0x11bf4b644c4ad1c9e18a96c1f35cdd161941d2355742aaa3577dcefef0382a16 (2)
        master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
-The `tempKey` record that we just inserted only exists in the `temp` head, and if we switched back to master it would not be visible there.
+The `tempKey` record that we just inserted only exists in the `temp` head, and if we checkout back to master it would not be visible there.
 
 Running `quadb checkout` with no head name will result in a detached head pointing to an empty tree (see FIXME).
 
 ### quadb fork
 
-When we created a new head with checkout, it was initialized to an empty tree. Instead, we may choose to use `fork` to copy the current head to the new head:
+When we created a new head with checkout, it was initialized to an empty tree. Instead, we may choose to use `quadb fork` to copy the current head to the new head:
 
     $ quadb fork temp2
     $ ./quadb head
@@ -147,7 +147,7 @@ When we created a new head with checkout, it was initialized to an empty tree. I
 
 Our new `temp2` head starts off with the same root as `temp`. We can now modify `temp2` and it will not affect the `temp` tree.
 
-Although semantically `fork` acts like it copies the tree pointed to by the current head, no copying actually occurs. In fact, the two trees share the same structure so forking is a very inexpensive operation. Cheap database snapshots is an important feature of Quadrable, and is useful for a variety of tasks.
+Although semantically `quadb fork` acts like it copies the tree pointed to by the current head, no copying actually occurs. In fact, the two trees share the same structure so forking is a very inexpensive operation. Cheap database snapshots is an important feature of Quadrable, and is useful for a variety of tasks.
 
 `quadb fork` can take a second argument which represents the head to be copied from, instead of using the current head. Or it can take no arguments, in which case the current head is forked to a detached head (see FIXME).
 
