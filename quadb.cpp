@@ -206,8 +206,9 @@ void parse_command_line(int argc, char **argv) {
         } else {
             std::cout << "Head: " << db.getHead() << std::endl;
         }
-        std::cout << "Root: " << to_hex(db.root(txn), true) << std::endl;
-        std::cout << "Node: " << db.getHeadNodeId(txn) << std::endl;
+
+        uint64_t nodeId = db.getHeadNodeId(txn);
+        std::cout << "Root: " << quadrable::renderNode(txn, db, nodeId) << std::endl;
     } else if (args["proof"].asBool()) {
         std::string k = args["<key>"].asString();
         // FIXME
