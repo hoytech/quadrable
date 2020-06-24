@@ -1,7 +1,18 @@
 ![Quadrable Logo](docs/logo.svg)
 
-Quadrable is an authenticated multi-version database based on a sparse binary merkle tree.
+Quadrable is an authenticated multi-version embedded database based on a sparse binary merkle tree.
 
+## Introduction
+
+* *Authenticated*: The entire state of the database can be digested down to a 32-byte value, known as the "root". This represents the entire contents of the database, and any modifications will change this root. Furthermore, anyone who knows the root value but does not have a copy of the database can perform queries on the database remotely, so long as somebody provides "proofs" along with the results. These proofs are compared against the root to authenticate the query results.
+* *Multi-version*: Many different versions of the database can exist at the same time. Versions that are derived from other versions don't result in the entire database being copied. Instead, all of the database that is common between the versions is shared, in a copy-on-write manner. With this functionality, database snapshots or checkpoints are very inexpensive so they can be used liberally, and for many purposes.
+* *Embedded*: The main functionality exists in a C++ library that is intended to be used by applications, such as the included command-line application `quadb`. Quadrable uses [LMDB](https://lmdb.tech), which is an efficient database library that embeds the database into your process by memory-mapping a file.
+
+Although not necessary for simple usage, it can help to understand the data-structure used by Quadrature:
+
+* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in the same way to create a smaller set of intermediate nodes, and this continues until a single node is left, which is called the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
+* *Binary*: This style of merkle tree combines together exactly two nodes to create the node in the next layer. There are alternative merkle tree designs such as radix trees, AVL trees, or tries, but they are much more complicated to implement and typically have a much larger authentication overhead (proof size). With a few optimisations and attention to implementation detail, binary merkle trees can enjoy almost all the benefits of these more complicated designs, as we will describe in FIXME.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. The consequence of this is that keys must be "dense" (without gaps), for example the sequence of integers from 1 to N. This opens the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable solves this by using a sparse merkle tree structure, where there *is* a concept of an empty leaf, and keys can be anywhere inside a large (256-bit) keyspace.
 
 
 ## Building
@@ -145,7 +156,7 @@ Although semantically `fork` acts like it copies the tree pointed to by the curr
 
 ### Operation Batching
 
-The Quadrable library is built so that all operations can be batched.
+The Quadrable library is designed so that all operations can be batched.
 
 #### Batched Updates
 
@@ -197,4 +208,4 @@ Use the following to avoid unnecessary tree traversals:
 
 Quadrable © 2020 Doug Hoyte.
 
-It is licensed under the 2-clause BSD license. See the LICENSE file for details.
+2-clause BSD license. See the LICENSE file.
