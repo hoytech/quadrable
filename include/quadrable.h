@@ -506,6 +506,17 @@ class Quadrable {
         NodeType nodeType;
     };
 
+    PutNodeInfo putNode(lmdb::txn &txn, std::string_view nodeRaw) {
+        if (nodeRaw.size() < 40) throw quaderr("nodeRaw too short");
+        uint64_t newNodeId = getNextIntegerKey(txn, dbi_node);
+        dbi_node.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);
+
+        // FIXME: can we merge buildNodeX and putNode to avoid this DB lookup?
+        ParsedNode node(txn, dbi_node, newNodeId);
+
+        return PutNodeInfo{newNodeId, Hash::existingHash(nodeRaw.substr(8, 32)), node.nodeType};
+    }
+
     void apply(lmdb::txn &txn, UpdateSet &updatesOrig) {
         // If exception is thrown, updatesOrig could be in inconsistent state, so ensure it's cleared
         UpdateSet updates = std::move(updatesOrig);
@@ -529,13 +540,6 @@ class Quadrable {
     PutNodeInfo putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp) {
         ParsedNode node(txn, dbi_node, nodeId);
 
-        auto putNode = [&](NodeType nodeType, std::string_view nodeRaw){
-            if (nodeRaw.size() < 40) throw quaderr("nodeRaw too short");
-            uint64_t newNodeId = getNextIntegerKey(txn, dbi_node);
-            dbi_node.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);
-            return PutNodeInfo{newNodeId, Hash::existingHash(nodeRaw.substr(8, 32)), nodeType};
-        };
-
         auto reuseNode = [&]{
             return PutNodeInfo{nodeId, Hash::existingHash(node.nodeHash()), node.nodeType};
         };
@@ -546,9 +550,9 @@ class Quadrable {
 
         auto putLeaf = [&](const Hash &keyHash, std::string_view val, uint64_t depth, bool isWitness){
             if (isWitness) {
-                return putNode(NodeType::WitnessLeaf, buildNodeWitnessLeaf(keyHash, Hash::existingHash(val), depth));
+                return putNode(txn, buildNodeWitnessLeaf(keyHash, Hash::existingHash(val), depth));
             } else {
-                return putNode(NodeType::Leaf, buildNodeLeaf(keyHash, val, depth));
+                return putNode(txn, buildNodeLeaf(keyHash, val, depth));
             }
         };
 
@@ -662,8 +666,7 @@ class Quadrable {
             // One of the nodes is a branch, or both are leaves, so bubbling can stop
         }
 
-        // FIXME: BranchBoth is not necessarily correct here, just hacking it in since all we care about is whether it's some kind of branch
-        return putNode(NodeType::BranchBoth, buildNodeBranch(leftNode.nodeId, rightNode.nodeId, leftNode.nodeHash, rightNode.nodeHash));
+        return putNode(txn, buildNodeBranch(leftNode.nodeId, rightNode.nodeId, leftNode.nodeHash, rightNode.nodeHash));
     }
 
 
@@ -929,13 +932,6 @@ class Quadrable {
     }
 
     PutNodeInfo importProof(lmdb::txn &txn, Proof &proof) {
-        auto putNode = [&](NodeType nodeType, std::string_view nodeRaw){
-            if (nodeRaw.size() < 40) throw quaderr("nodeRaw too short");
-            uint64_t newNodeId = getNextIntegerKey(txn, dbi_node);
-            dbi_node.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);
-            return PutNodeInfo{newNodeId, Hash::existingHash(nodeRaw.substr(8, 32)), nodeType};
-        };
-
         if (getHeadNodeId(txn)) throw quaderr("can't importProof into existing head");
 
         std::vector<ImportProofItemAccum> accums;
@@ -946,10 +942,10 @@ class Quadrable {
             auto next = static_cast<ssize_t>(i+1);
 
             if (elem.proofType == ProofElem::Type::Leaf) {
-                auto info = putNode(NodeType::Leaf, buildNodeLeaf(keyHash, elem.val, elem.depth));
+                auto info = putNode(txn, buildNodeLeaf(keyHash, elem.val, elem.depth));
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
             } else if (elem.proofType == ProofElem::Type::WitnessLeaf) {
-                auto info = putNode(NodeType::WitnessLeaf, buildNodeWitnessLeaf(keyHash, Hash::existingHash(elem.val), elem.depth));
+                auto info = putNode(txn, buildNodeWitnessLeaf(keyHash, Hash::existingHash(elem.val), elem.depth));
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
             } else if (elem.proofType == ProofElem::Type::WitnessEmpty) {
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, 0, next, keyHash, Hash::nullHash(), });
@@ -971,7 +967,7 @@ class Quadrable {
             PutNodeInfo siblingInfo;
 
             if (cmd.op == ProofCmd::Op::HashProvided) {
-                siblingInfo = putNode(NodeType::Witness, buildNodeWitness(cmd.h));
+                siblingInfo = putNode(txn, buildNodeWitness(cmd.h));
             } else if (cmd.op == ProofCmd::Op::HashEmpty) {
                 siblingInfo = PutNodeInfo{ 0, Hash::nullHash(), NodeType::Empty, };
             } else if (cmd.op == ProofCmd::Op::Merge) {
@@ -995,8 +991,7 @@ class Quadrable {
                 branch = buildNodeBranch(siblingInfo.nodeId, accum.nodeId, siblingInfo.nodeHash, accum.nodeHash);
             }
 
-            // FIXME: BranchBoth is not necessarily correct here
-            auto branchInfo = putNode(NodeType::BranchBoth, branch);
+            auto branchInfo = putNode(txn, branch);
 
             accum.depth--;
             accum.nodeId = branchInfo.nodeId;
