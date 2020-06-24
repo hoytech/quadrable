@@ -158,7 +158,7 @@ void parse_command_line(int argc, char **argv) {
                 if (!isDetachedHead && currHead == e.head) std::cout << "=> ";
                 else std::cout << "   ";
 
-                std::cout << e.head << " : " << e.nodeId << std::endl;
+                std::cout << e.head << " : " << quadrable::renderNode(txn, db, e.nodeId) << std::endl;
             }
         }
     } else if (args["list"].asBool()) {
