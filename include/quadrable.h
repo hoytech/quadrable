@@ -518,6 +518,14 @@ class Quadrable {
         if (newNode.nodeId != oldNodeId) setHeadNodeId(txn, newNode.nodeId);
     }
 
+    void put(lmdb::txn &txn, std::string_view key, std::string_view val) {
+        change().put(key, val).apply(txn);
+    }
+
+    void del(lmdb::txn &txn, std::string_view key) {
+        change().del(key).apply(txn);
+    }
+
     PutNodeInfo putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp) {
         ParsedNode node(txn, dbi_node, nodeId);
 
@@ -725,6 +733,18 @@ class Quadrable {
         }
 
         return false;
+    }
+
+    GetMultiQuery get(lmdb::txn &txn, std::set<std::string> keys) {
+        GetMultiQuery query;
+
+        for (auto &key : keys) {
+            query.emplace(key, GetMultiResult{});
+        }
+
+        getMulti(txn, query);
+
+        return query;
     }
 
 

@@ -167,16 +167,7 @@ void doTests() {
         }
         changes.apply(txn);
 
-        quadrable::GetMultiQuery query{
-            { "30", {} },
-            { "31", {} },
-            { "32", {} },
-
-            { "blah", {} },
-            { "nope", {} },
-        };
-
-        db.getMulti(txn, query);
+        auto query = db.get(txn, { "30", "31", "32", "blah", "nope", });
 
         verify(query["30"].exists && query["30"].val == "N = 30");
         verify(query["31"].exists && query["31"].val == "N = 31");
@@ -376,7 +367,7 @@ void doTests() {
 
         for (int i=0; i<n; i++) {
             std::string s = std::to_string(i);
-            db.change().put(s, s+s).apply(txn); // not in batch
+            db.put(txn, s, s+s); // not in batch
         }
 
         stats = db.stats(txn);
