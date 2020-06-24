@@ -1,12 +1,14 @@
 ![Quadrable Logo](docs/logo.svg)
 
-Quadrable is an authenticated multi-version database built on top of a sparse binary merkle tree.
+Quadrable is an authenticated multi-version database based on a sparse binary merkle tree.
 
 
 
 ## Building
 
 ### Dependencies
+
+The LMDB library and header files are required. On Ubuntu/Debian run this:
 
     sudo apt install -y liblmdb-dev
 
@@ -48,9 +50,9 @@ The status command shows you some basic information about your current database 
     Head: master
     Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
-*Head* is like your current branch in git, and can be thought of as a symbolic link that is updated to point to the latest tree as it is modified. The default head is `master`. Quadrable doesn't call these links branches because it has a concept of branches internally, and this would confuse the code too much.
+*Head* is like your current branch in git, and can be thought of as a symbolic link that is updated to point to the latest version of the tree as it is modified. The default head is `master`. Quadrable doesn't call these links "branches" because it has a concept of branches internally, and this would confuse the code too much.
 
-*Root* is the hash of the root node in your database. Provided the hash function is cryptographically secure, this is a globally unique identifier for the current state of the tree pointed to by your head. In the empty state, a special all-zero value is used (see FIXME).
+*Root* is the hash of the root node in your database. Provided the hash function is cryptographically secure, this is a globally unique identifier for the current state of the tree pointed to by your head. For an empty tree, a special all-zero value is used (see FIXME).
 
 The number in parentheses after the root hash is the *nodeId*. This is an internal value used by Quadrable and is shown here for informational purposes only (see FIXME).
 
@@ -84,7 +86,7 @@ This deletes a key from the database. If there was no such key in the database, 
 
     $ quadb del key
 
-If we run `status` again, we can see the root has changed back the all-zeros value, signifying an empty database:
+If we run `status` again, we can see the root has changed back to the all-zeros value, signifying an empty tree:
 
     $ quadb status
     Head: master
@@ -99,28 +101,28 @@ A database can have many heads. You can view the list of heads with the `head` c
     $ quadb head
     => master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
-The `=>` arrow indicates the current head. The heads are sorted by `nodeId` (the number in parentheses), so the most recently updates heads will appear at the top.
+The `=>` arrow indicates that `master` is the current head. The heads are sorted by `nodeId` (the number in parentheses), so the most recently updated heads will appear at the top.
 
-The `head rm` command can be used to delete a head:
+The `head rm` command can be used to delete a head (or do nothing if it doesn't exist):
 
-    $ quadb head rm master
+    $ quadb head rm headToRemove
 
 ### quadb checkout
 
-The `checkout` command can be used to change the current head. If we switch to a brand-new head, then this head will start out as the empty tree. For example, let's switch to a new head called `temp`. On success there is no output:
+The `checkout` command can be used to change the current head. If we switch to a brand-new head, then this head will start out as the empty tree. For example, let's switch to a brand-new head called `temp`. On success there is no output:
 
     $ quadb checkout temp
 
-Note that this new head will not appear in the `quadb head` list until we have done completed a write operation on this head, like so:
+This new head will not appear in the `quadb head` list until we have completed a write operation, like so:
 
     $ quadb put tempKey tempVal
     $ quadb head
     => temp : 0x11bf4b644c4ad1c9e18a96c1f35cdd161941d2355742aaa3577dcefef0382a16 (2)
        master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
-Note that the `tempKey` record that we just inserted only exists in the `temp` head, and if we switched back to master it would not be visible.
+The `tempKey` record that we just inserted only exists in the `temp` head, and if we switched back to master it would not be visible there.
 
-Running `quadb checkout` with no head name will result in a detached head pointing to a new, empty head (see FIXME).
+Running `quadb checkout` with no head name will result in a detached head pointing to an empty tree (see FIXME).
 
 ### quadb fork
 
@@ -134,11 +136,9 @@ When we created a new head with checkout, it was initialized to an empty tree. I
 
 Our new `temp2` head starts off with the same root as `temp`. We can now modify `temp2` and it will not affect the `temp` tree.
 
-Although semantically `fork` acts like it copies the tree pointed to by the current head, no copying actually occurs. In fact, the two trees share the same structure so forking is a very inexpensive operation. Very cheap database snapshots is an important feature of Quadrable, and is useful for a variety of tasks.
+Although semantically `fork` acts like it copies the tree pointed to by the current head, no copying actually occurs. In fact, the two trees share the same structure so forking is a very inexpensive operation. Cheap database snapshots is an important feature of Quadrable, and is useful for a variety of tasks.
 
-`quadb fork` can take a second argument which represents the head to be copied from, instead of using the current head.
-
-It can also take no arguments at, in which case the current head is forked to a detached head (see FIXME).
+`quadb fork` can take a second argument which represents the head to be copied from, instead of using the current head. Or it can take no arguments, in which case the current head is forked to a detached head (see FIXME).
 
 
 ## C++ Library
@@ -149,7 +149,7 @@ The Quadrable library is built so that all operations can be batched.
 
 #### Batched Updates
 
-Suppose we'd like to update two keys in the DB. You can do this by calling the `put` method two times, like so:
+Suppose you'd like to update two keys in the DB. You can do this by calling the `put` method two times, like so:
 
     db.put(txn, "key1", "val1");
     db.put(txn, "key2", "val2");
@@ -172,7 +172,7 @@ In this case, all the modifications will be made with a single traversal of the 
 
 #### Batched Gets
 
-Although the benefit isn't quite as important as batched updates, Quadrable also supports batched gets. This allows us to retrieve multiple values from the DB in a single tree traversal.
+Although the benefit isn't quite as significant as in the update case, Quadrable also supports batched gets. This allows us to retrieve multiple values from the DB in a single tree traversal.
 
 So instead of:
 
@@ -195,6 +195,6 @@ Use the following to avoid an additional tree traversal:
 
 ## Author and Copyright
 
-Quadrable was written by Doug Hoyte.
+Quadrable is ©2020 Doug Hoyte.
 
 It is licensed under the 2-clause BSD license. See the LICENSE file for details.

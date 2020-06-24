@@ -19,3 +19,5 @@ docs
   - key hash suffixes of empty witnesses are 0'd out: optimization for evm
   - adversarial proof bloating
     - mine 2 values with common N-bit prefix (can use birthday attacks)
+  - encoding (lack thereof) used for keys/vals
+    - no length limits, not even keys (because stored as hashes)
