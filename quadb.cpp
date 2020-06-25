@@ -33,6 +33,7 @@ R"(
       quadb [options] head rm <head>
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [<from>]
+      quadb [options] gc
       quadb [options] proof <key>
       quadb [options] dump-tree
       quadb [options] mineHash <prefix>
@@ -161,7 +162,7 @@ void run(int argc, char **argv) {
 
             std::string_view k, v;
             auto cursor = lmdb::cursor::open(txn, db.dbi_head);
-            for(bool found = cursor.get(k, v, MDB_FIRST); found; found = cursor.get(k, v, MDB_NEXT)) {
+            for (bool found = cursor.get(k, v, MDB_FIRST); found; found = cursor.get(k, v, MDB_NEXT)) {
                 headElems.emplace_back(HeadElem{ std::string(k), lmdb::from_sv<uint64_t>(v), });
             }
 
@@ -182,7 +183,7 @@ void run(int argc, char **argv) {
         if (args["--sep"]) sep = args["--sep"].asString();
 
         db.walkTree(txn, [&](quadrable::ParsedNode &node, uint64_t depth){
-            if (!node.isLeaf()) return;
+            if (!node.isLeaf()) return true;
 
             std::string_view leafKey;
             if (db.getLeafKey(txn, node.nodeId, leafKey)) {
@@ -197,6 +198,8 @@ void run(int argc, char **argv) {
             else std::cout << quadrable::renderUnknown(node.leafValHash());
 
             std::cout << "\n";
+
+            return true;
         });
 
         std::cout << std::flush;
@@ -247,6 +250,16 @@ void run(int argc, char **argv) {
 
         uint64_t nodeId = db.getHeadNodeId(txn);
         std::cout << "Root: " << quadrable::renderNode(db, txn, nodeId) << std::endl;
+    } else if (args["gc"].asBool()) {
+        quadrable::Quadrable::GarbageCollector gc(db);
+
+        gc.markAllHeads(txn);
+
+        if (db.isDetachedHead()) gc.markTree(txn, db.getHeadNodeId(txn));
+
+        auto stats = gc.sweep(txn);
+
+        std::cout << "Collected " << stats.collected << "/" << stats.total << " nodes" << std::endl;
     } else if (args["proof"].asBool()) {
         std::string k = args["<key>"].asString();
         // FIXME
