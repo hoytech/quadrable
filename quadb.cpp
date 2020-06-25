@@ -13,6 +13,7 @@
 
 #include "quadrable.h"
 #include "quadrable/utils.h"
+#include "quadrable/proof.h"
 
 
 using quadrable::quaderr;

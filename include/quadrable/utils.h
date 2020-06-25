@@ -101,18 +101,18 @@ static inline void dumpProof(Proof &p) {
     for (size_t i=0; i<p.elems.size(); i++) {
         auto &elem = p.elems[i];
 
-        std::string proofType = elem.proofType == ProofElem::Type::Leaf ? "Leaf" :
-                                elem.proofType == ProofElem::Type::WitnessLeaf ? "WitnessLeaf" :
-                                elem.proofType == ProofElem::Type::WitnessEmpty ? "WitnessEmpty" :
-                                "?";
+        std::string elemType = elem.elemType == ProofElem::Type::Leaf ? "Leaf" :
+                               elem.elemType == ProofElem::Type::WitnessLeaf ? "WitnessLeaf" :
+                               elem.elemType == ProofElem::Type::WitnessEmpty ? "WitnessEmpty" :
+                               "?";
 
         std::cout << "  ITEM " << i << ": " << to_hex(elem.keyHash, true) << ")\n";
-        std::cout << "    " << proofType << "  depth=" << elem.depth << "\n";
+        std::cout << "    " << elemType << "  depth=" << elem.depth << "\n";
 
-        if (elem.proofType == ProofElem::Type::Leaf) {
+        if (elem.elemType == ProofElem::Type::Leaf) {
             if (elem.key.size()) std::cout << "    Key: " << elem.key << "\n";
             std::cout << "    Val: " << elem.val << "\n";
-        } else if (elem.proofType == ProofElem::Type::WitnessLeaf) {
+        } else if (elem.elemType == ProofElem::Type::WitnessLeaf) {
             std::cout << "    Val hash: " << to_hex(elem.val, true) << "\n";
         }
     }

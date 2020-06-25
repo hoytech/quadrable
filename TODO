@@ -20,3 +20,4 @@ docs
     - mine 2 values with common N-bit prefix (can use birthday attacks)
   - encoding (lack thereof) used for keys/vals
     - no length limits, not even keys (because stored as hashes)
+  - proof encoding starts at end, because first must be merged last, and because negative numbers have larger range in twos complement

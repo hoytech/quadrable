@@ -6,6 +6,7 @@
 
 #include "quadrable.h"
 #include "quadrable/utils.h"
+#include "quadrable/proof.h"
 
 
 
@@ -941,6 +942,26 @@ void doTests() {
         });
 
 
+    });
+
+
+
+
+    test("proof encoding", [&]{
+        auto changes = db.change();
+        changes.put("a", std::string(200, '\xDD'));
+        changes.apply(txn);
+
+        auto origRoot = db.root(txn);
+
+        auto proof = db.generateProof(txn, {
+            "a",
+        });
+
+        auto encodedProof = quadrable::proofTransport::encodeProof(proof);
+        std::cout << "BING: " << to_hex(encodedProof) << std::endl;
+
+        db.checkout();
     });
 
 

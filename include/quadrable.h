@@ -148,10 +148,11 @@ using GetMultiQuery = std::map<std::string, GetMultiResult>;
 
 struct ProofElem {
     enum class Type {
-        Leaf = 0,
-        WitnessLeaf = 1,
-        WitnessEmpty = 2,
-    } proofType;
+        Invalid = 0,
+        Leaf = 1,
+        WitnessLeaf = 2,
+        WitnessEmpty = 3,
+    } elemType;
     uint64_t depth;
     std::string keyHash;
     std::string val;  // Type::Leaf: value, Type::WitnessLeaf: hash(value), Type::WitnessEmpty: ignored
@@ -1015,16 +1016,16 @@ class Quadrable {
             auto keyHash = Hash::existingHash(elem.keyHash);
             auto next = static_cast<ssize_t>(i+1);
 
-            if (elem.proofType == ProofElem::Type::Leaf) {
+            if (elem.elemType == ProofElem::Type::Leaf) {
                 auto info = BuiltNode::newLeaf(this, txn, keyHash, elem.val, elem.depth, elem.key);
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
-            } else if (elem.proofType == ProofElem::Type::WitnessLeaf) {
+            } else if (elem.elemType == ProofElem::Type::WitnessLeaf) {
                 auto info = BuiltNode::newWitnessLeaf(this, txn, keyHash, Hash::existingHash(elem.val), elem.depth);
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
-            } else if (elem.proofType == ProofElem::Type::WitnessEmpty) {
+            } else if (elem.elemType == ProofElem::Type::WitnessEmpty) {
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, 0, next, keyHash, Hash::nullHash(), });
             } else {
-                throw quaderr("unrecognized ProofItem type: ", int(elem.proofType));
+                throw quaderr("unrecognized ProofItem type: ", int(elem.elemType));
             }
         }
 
