@@ -436,21 +436,6 @@ class Quadrable {
             return {nodeId, nodeHash, nodeType};
         }
 
-        static BuiltNode copyLeaf(Quadrable *db, lmdb::txn &txn, ParsedNode &node, uint64_t depth) {
-            if (node.nodeType == NodeType::Leaf) {
-                auto leaf = newLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), node.leafVal(), depth);
-                if (db->trackKeys) {
-                    std::string_view leafKey;
-                    if (db->getLeafKey(txn, node.nodeId, leafKey)) db->setLeafKey(txn, leaf.nodeId, leafKey);
-                }
-                return leaf;
-            } else if (node.nodeType == NodeType::WitnessLeaf) {
-                return newWitnessLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), Hash::existingHash(node.leafValHash()), depth);
-            } else {
-                throw quaderr("tried to copyLeaf on a non-leaf");
-            }
-        }
-
         static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, std::string_view val, uint64_t depth, std::string_view leafKey = "") {
             BuiltNode output;
 
@@ -460,8 +445,8 @@ class Quadrable {
 
                 Keccak k;
 
-                k.add(keyHash.sv());
                 k.add(&depthChar, 1);
+                k.add(keyHash.sv());
                 k.add(valHash.sv());
 
                 k.getHash(output.nodeHash.data);
@@ -482,15 +467,6 @@ class Quadrable {
             return output;
         }
 
-        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, UpdateSetMap::iterator it, uint64_t depth) {
-            if (it->second.witness) {
-                return newWitnessLeaf(db, txn, it->first, Hash::existingHash(it->second.val), depth);
-            } else {
-                auto leaf = newLeaf(db, txn, it->first, it->second.val, depth, it->second.key);
-                return leaf;
-            }
-        }
-
         static BuiltNode newWitnessLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, const Hash &valHash, uint64_t depth) {
             BuiltNode output;
 
@@ -499,8 +475,8 @@ class Quadrable {
 
                 Keccak k;
 
-                k.add(keyHash.sv());
                 k.add(&depthChar, 1);
+                k.add(keyHash.sv());
                 k.add(valHash.sv());
 
                 k.getHash(output.nodeHash.data);
@@ -569,6 +545,32 @@ class Quadrable {
             output.nodeType = NodeType::BranchBoth;
 
             return output;
+        }
+
+        // Wrappers
+
+        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, UpdateSetMap::iterator it, uint64_t depth) {
+            if (it->second.witness) {
+                return newWitnessLeaf(db, txn, it->first, Hash::existingHash(it->second.val), depth);
+            } else {
+                auto leaf = newLeaf(db, txn, it->first, it->second.val, depth, it->second.key);
+                return leaf;
+            }
+        }
+
+        static BuiltNode copyLeaf(Quadrable *db, lmdb::txn &txn, ParsedNode &node, uint64_t depth) {
+            if (node.nodeType == NodeType::Leaf) {
+                auto leaf = newLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), node.leafVal(), depth);
+                if (db->trackKeys) {
+                    std::string_view leafKey;
+                    if (db->getLeafKey(txn, node.nodeId, leafKey)) db->setLeafKey(txn, leaf.nodeId, leafKey);
+                }
+                return leaf;
+            } else if (node.nodeType == NodeType::WitnessLeaf) {
+                return newWitnessLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), Hash::existingHash(node.leafValHash()), depth);
+            } else {
+                throw quaderr("tried to copyLeaf on a non-leaf");
+            }
         }
     };
 
