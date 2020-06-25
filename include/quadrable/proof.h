@@ -32,12 +32,33 @@ std::string varInt(uint64_t n) {
 
 /*
 
-ProofCmd encoding
+Proof encoding:
 
-    do hashing: 0[7 bits hashing details, all 0 == merge]
-          jump: 10[6 bits signed jump]   can jump from -32 to +31
- long jump fwd: 110[n=5 bits jump]    jumps 2^(n+5)
- long jump rev: 111[n=5 bits jump]    jumps -2^(n+5)
+[1 byte proof type]
+[ProofElem]+
+[ProofCmd]+
+
+
+ProofElem:
+
+[1 byte elem type, Invalid means end of elems]
+[1 byte depth]
+if CompactNoKeys:
+  [32 byte keyHash]
+else if CompactWithKeys:
+  [varint size of key]
+  [N-byte key]
+[varint size of val]
+[N-byte val]
+
+
+ProofCmd:
+
+       hashing: 0[7 bits hashing details, all 0 == merge]
+short jump fwd: 100[5 bits distance]   jumps d+1, range: 1 to 32
+short jump rev: 101[5 bits distance]   jumps -(d+1) range: -1 to -32
+ long jump fwd: 110[5 bits distance]   jumps 2^(d+6) range: 64, 128, 256, 512, ..., 2^37
+ long jump rev: 111[5 bits distance]   jumps -2^(d+6) range: -64, -128, -256, -512, ..., -2^37
 
 */
 
@@ -86,11 +107,50 @@ static inline std::string encodeProof(Proof &p, EncodingType encodingType = Enco
     if (p.elems.size() == 0) return o;
 
     uint64_t currPos = p.elems.size() - 1; // starts at end
+    std::vector<ProofCmd> hashQueue;
+
+    auto flushHashQueue = [&]{
+        if (hashQueue.size() == 0) return;
+        assert(hashQueue.size() < 7);
+
+        uint64_t bits = 0;
+
+        for (size_t i = 0; i < hashQueue.size() ; i++) {
+            if (hashQueue[i].op == ProofCmd::Op::HashProvided) bits |= 1 << (7 - i);
+        }
+
+        bits |= 1 << (6 - hashQueue.size());
+
+        o += static_cast<unsigned char>(bits); // hashing
+
+        for (auto &cmd : hashQueue) {
+            if (cmd.op == ProofCmd::Op::HashProvided) o += cmd.hash;
+        }
+
+        hashQueue.clear();
+    };
 
     for (auto &cmd : p.cmds) {
-        if (cmd.nodeOffset == currPos) {
+        if (cmd.nodeOffset != currPos) {
+            flushHashQueue();
+
+            // jump
+
+            currPos = cmd.nodeOffset;
+        }
+
+        if (cmd.op == ProofCmd::Op::Merge) {
+            // merge
+            flushHashQueue();
+            o += static_cast<unsigned char>(0);
+        } else {
+            // hash provided/empty
+            hashQueue.emplace_back(cmd);
+            if (hashQueue.size() == 6) flushHashQueue();
         }
     }
+
+    flushHashQueue();
 
     return o;
 }

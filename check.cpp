@@ -949,7 +949,7 @@ void doTests() {
 
     test("proof encoding", [&]{
         auto changes = db.change();
-        changes.put("a", std::string(200, '\xDD'));
+        changes.put("a", std::string(200, 'A'));
         changes.apply(txn);
 
         auto origRoot = db.root(txn);
@@ -957,6 +957,7 @@ void doTests() {
         auto proof = db.generateProof(txn, {
             "a",
         });
+        dumpProof(proof);
 
         auto encodedProof = quadrable::proofTransport::encodeProof(proof);
         std::cout << "BING: " << to_hex(encodedProof) << std::endl;
