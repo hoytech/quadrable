@@ -13,10 +13,15 @@ using hoytech::to_hex;
 namespace quadrable {
 
 
-static inline std::string renderNode(lmdb::txn &txn, quadrable::Quadrable &db, uint64_t nodeId) {
-    ParsedNode node(txn, db.dbi_node, nodeId);
+static inline std::string renderNode(quadrable::Quadrable &db, lmdb::txn &txn, ParsedNode &node, size_t abbrev = 0) {
+    std::string nodeHash = to_hex(node.nodeHash(), true);
+    if (abbrev) nodeHash = nodeHash.substr(0, abbrev+2) + "...";
+    return nodeHash + " (" + std::to_string(node.nodeId) + ")";
+}
 
-    return to_hex(node.nodeHash(), true) + " (" + std::to_string(nodeId) + ")";
+static inline std::string renderNode(quadrable::Quadrable &db, lmdb::txn &txn, uint64_t nodeId) {
+    ParsedNode node(txn, db.dbi_node, nodeId);
+    return renderNode(db, txn, node);
 }
 
 
@@ -30,14 +35,22 @@ static inline void dumpDbAux(quadrable::Quadrable &db, lmdb::txn &txn, uint64_t 
 
     std::cout << std::string(depth*2, ' '); 
 
-    std::cout << nodeId << ": ";
-    std::cout << to_hex(node.nodeHash(), true) << ": ";
+    std::cout << renderNode(db, txn, node, 8) << " ";
 
     if (node.nodeType == quadrable::NodeType::Empty) {
         std::cout << "empty";
         std::cout << "\n";
     } else if (node.nodeType == quadrable::NodeType::Leaf) {
-        std::cout << "leaf: " << to_hex(node.leafKeyHash(), true) << " val = " << node.leafVal();
+        std::cout << "leaf: ";
+
+        std::string_view leafKey;
+        if (db.getLeafKey(txn, node.nodeId, leafKey)) {
+            std::cout << leafKey;
+        } else {
+            std::cout << renderUnknown(node.leafKeyHash());
+        }
+
+        std::cout << " = " << node.leafVal();
         std::cout << "\n";
     } else if (node.nodeType == quadrable::NodeType::WitnessLeaf) {
         std::cout << "witness leaf: " << to_hex(node.leafKeyHash(), true) << " hash(val) = " << to_hex(node.leafValHash(), true);

@@ -124,6 +124,7 @@ static inline bool operator !=(const Hash &h1, std::string_view sv) {
 
 
 struct Update {
+    std::string key; // only used if trackKeys is set
     std::string val;
     bool deletion;
     bool witness; // if true, val is a hash of the value. used for inserting WitnessLeaf nodes
@@ -300,6 +301,7 @@ class Quadrable {
     void init(lmdb::txn &txn) {
         dbi_head = lmdb::dbi::open(txn, "quadrable_head", MDB_CREATE);
         dbi_node = lmdb::dbi::open(txn, "quadrable_node", MDB_CREATE | MDB_INTEGERKEY);
+        if (trackKeys) dbi_key = lmdb::dbi::open(txn, "quadrable_key", MDB_CREATE | MDB_INTEGERKEY);
     }
 
 
@@ -373,12 +375,12 @@ class Quadrable {
         UpdateSet(Quadrable *db_) : db(db_) {}
 
         UpdateSet &put(std::string_view keyRaw, std::string_view val) {
-            map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(val), false, false});
+            map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(db->trackKeys ? keyRaw : ""), std::string(val), false, false});
             return *this;
         }
 
         UpdateSet &del(std::string_view keyRaw) {
-            map.insert_or_assign(Hash::hash(keyRaw), Update{"", true, false});
+            map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(keyRaw), "", true, false});
             return *this;
         }
 
@@ -432,7 +434,12 @@ class Quadrable {
 
         static BuiltNode copyLeaf(Quadrable *db, lmdb::txn &txn, ParsedNode &node, uint64_t depth) {
             if (node.nodeType == NodeType::Leaf) {
-                return newLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), node.leafVal(), depth);
+                auto leaf = newLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), node.leafVal(), depth);
+                if (db->trackKeys) {
+                    std::string_view leafKey;
+                    if (db->getLeafKey(txn, node.nodeId, leafKey)) db->setLeafKey(txn, leaf.nodeId, leafKey);
+                }
+                return leaf;
             } else if (node.nodeType == NodeType::WitnessLeaf) {
                 return newWitnessLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), Hash::existingHash(node.leafValHash()), depth);
             } else {
@@ -469,6 +476,16 @@ class Quadrable {
             return output;
         }
 
+        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, UpdateSetMap::iterator it, uint64_t depth) {
+            if (it->second.witness) {
+                return newWitnessLeaf(db, txn, it->first, Hash::existingHash(it->second.val), depth);
+            } else {
+                auto leaf = newLeaf(db, txn, it->first, it->second.val, depth);
+                if (db->trackKeys) db->setLeafKey(txn, leaf.nodeId, it->second.key);
+                return leaf;
+            }
+        }
+
         static BuiltNode newWitnessLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, const Hash &valHash, uint64_t depth) {
             BuiltNode output;
 
@@ -495,14 +512,6 @@ class Quadrable {
             output.nodeType = NodeType::WitnessLeaf;
 
             return output;
-        }
-
-        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, UpdateSetMap::iterator it, uint64_t depth) {
-            if (it->second.witness) {
-                return newWitnessLeaf(db, txn, it->first, Hash::existingHash(it->second.val), depth);
-            } else {
-                return newLeaf(db, txn, it->first, it->second.val, depth);
-            }
         }
 
         static BuiltNode newBranch(Quadrable *db, lmdb::txn &txn, uint64_t leftNodeId, uint64_t rightNodeId, Hash &leftHash, Hash &rightHash) {
@@ -579,6 +588,28 @@ class Quadrable {
         change().del(key).apply(txn);
     }
 
+    Update makeUpdateFromNode(lmdb::txn &txn, ParsedNode &node) {
+        if (node.nodeType == NodeType::Leaf) {
+            std::string_view leafKey = "";
+            if (trackKeys) getLeafKey(txn, node.nodeId, leafKey);
+            return Update{std::string(leafKey), std::string(node.leafVal()), false, false};
+        } else if (node.nodeType == NodeType::WitnessLeaf) {
+            return Update{"", node.leafValHash(), false, true};
+        } else {
+            throw quaderr("can't convert leaf to Update");
+        }
+    }
+
+    bool getLeafKey(lmdb::txn &txn, uint64_t nodeId, std::string_view &leafKey) {
+        if (!trackKeys) return false;
+        return dbi_key.get(txn, lmdb::to_sv<uint64_t>(nodeId), leafKey);
+    }
+
+    void setLeafKey(lmdb::txn &txn, uint64_t nodeId, std::string_view leafKey) {
+        if (!trackKeys) return;
+        dbi_key.put(txn, lmdb::to_sv<uint64_t>(nodeId), leafKey);
+    }
+
     BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp) {
         ParsedNode node(txn, dbi_node, nodeId);
         bool didBubble = false;
@@ -602,7 +633,7 @@ class Quadrable {
             if (std::next(begin) == end) {
                 return BuiltNode::newLeaf(this, txn, begin, depth);
             }
-        } else if (node.nodeType == NodeType::Leaf || node.nodeType == NodeType::WitnessLeaf) {
+        } else if (node.isLeaf()) {
             if (std::next(begin) == end && begin->first == node.leafKeyHash()) {
                 // Update an existing record
 
@@ -643,10 +674,7 @@ class Quadrable {
 
             if (!deleteThisLeaf) {
                 // emplace() ensures that we don't overwrite any updates to this leaf already in the UpdateSet.
-                auto emplaceRes = updates.map.emplace(Hash::existingHash(node.leafKeyHash()),
-                                                      node.nodeType == NodeType::Leaf
-                                                          ? Update{std::string(node.leafVal()), false, false}
-                                                          : Update{node.leafValHash(), false, true});
+                auto emplaceRes = updates.map.emplace(Hash::existingHash(node.leafKeyHash()), makeUpdateFromNode(txn, node));
 
                 // If we did insert it, and it went before the start of our iterator window, back up our iterator to include it.
                 //   * This happens when the leaf we are splitting is to the left of the leaf we are adding.
@@ -1124,6 +1152,9 @@ class Quadrable {
 
     lmdb::dbi dbi_head;
     lmdb::dbi dbi_node;
+    lmdb::dbi dbi_key;
+
+    bool trackKeys = false;
 
   private:
 

@@ -6,6 +6,7 @@
 #include <sys/types.h> // mkdir
 
 #include <iostream>
+#include <string>
 #include <random>
 
 #include <docopt.h>
@@ -24,7 +25,8 @@ R"(
       quadb [options] put <key> <val>
       quadb [options] del <key>
       quadb [options] get <key>
-      quadb [options] list
+      quadb [options] export [--sep=<sep>]
+      quadb [options] import [--sep=<sep>]
       quadb [options] stats
       quadb [options] status
       quadb [options] head
@@ -36,18 +38,20 @@ R"(
       quadb [options] mineHash <prefix>
 
     Options:
-      --db=<dir>  Database directory (default $ENV{QUADB_DIR} || "./quadb-dir/")
-      -h --help   Show this screen.
-      --version   Show version.
+      --db=<dir>     Database directory (default $ENV{QUADB_DIR} || "./quadb-dir/")
+      --noTrackKeys  Don't store keys in DB (default $ENV{QUADB_NOTRACKKEYS} || false)
+      -h --help      Show this screen.
+      --version      Show version.
 )";
 
 
 
 
-std::string dbDir;
+void run(int argc, char **argv) {
+    std::map<std::string, docopt::value> args = docopt::docopt(USAGE, { argv + 1, argv + argc }, true, "quadb " QUADRABLE_VERSION);
 
-void parse_command_line(int argc, char **argv) {
-    std::map<std::string, docopt::value> args = docopt::docopt(USAGE, { argv + 1, argv + argc }, true, "quadb " QUADRABLE_VERSION, true);
+
+    std::string dbDir;
 
     if (args["--db"]) {
         dbDir = args["--db"].asString();
@@ -58,6 +62,16 @@ void parse_command_line(int argc, char **argv) {
     }
 
     dbDir += "/";
+
+
+    bool noTrackKeys = false;
+
+    if (args["--noTrackKeys"].asBool()) {
+        noTrackKeys = true;
+    } else if (getenv("QUADB_NOTRACKKEYS")) {
+        noTrackKeys = true;
+    }
+
 
     if (access(dbDir.c_str(), F_OK)) {
         if (args["init"].asBool()) {
@@ -88,6 +102,8 @@ void parse_command_line(int argc, char **argv) {
 
 
     quadrable::Quadrable db;
+
+    db.trackKeys = !noTrackKeys;
 
 
 
@@ -158,16 +174,24 @@ void parse_command_line(int argc, char **argv) {
                 if (!isDetachedHead && currHead == e.head) std::cout << "=> ";
                 else std::cout << "   ";
 
-                std::cout << e.head << " : " << quadrable::renderNode(txn, db, e.nodeId) << std::endl;
+                std::cout << e.head << " : " << quadrable::renderNode(db, txn, e.nodeId) << std::endl;
             }
         }
-    } else if (args["list"].asBool()) {
+    } else if (args["export"].asBool()) {
+        std::string sep = ",";
+        if (args["--sep"]) sep = args["--sep"].asString();
+
         db.walkTree(txn, [&](quadrable::ParsedNode &node, uint64_t depth){
             if (!node.isLeaf()) return;
 
-            std::cout << quadrable::renderUnknown(node.leafKeyHash());
+            std::string_view leafKey;
+            if (db.getLeafKey(txn, node.nodeId, leafKey)) {
+                std::cout << leafKey;
+            } else {
+                std::cout << quadrable::renderUnknown(node.leafKeyHash());
+            }
 
-            std::cout << " -> ";
+            std::cout << sep;
 
             if (node.nodeType == quadrable::NodeType::Leaf) std::cout << node.leafVal();
             else std::cout << quadrable::renderUnknown(node.leafValHash());
@@ -176,6 +200,20 @@ void parse_command_line(int argc, char **argv) {
         });
 
         std::cout << std::flush;
+    } else if (args["import"].asBool()) {
+        std::string sep = ",";
+        if (args["--sep"]) sep = args["--sep"].asString();
+
+        auto changes = db.change();
+        std::string line;
+
+        while (std::getline(std::cin, line)) {
+            size_t delimOffset = line.find(sep);
+            if (delimOffset == std::string::npos) throw quaderr("couldn't find separator in input line");
+            changes.put(line.substr(0, delimOffset), line.substr(delimOffset + sep.size()));
+        }
+
+        changes.apply(txn);
     } else if (args["checkout"].asBool()) {
         if (args["<head>"]) {
             std::string newHead = args["<head>"].asString();
@@ -208,7 +246,7 @@ void parse_command_line(int argc, char **argv) {
         }
 
         uint64_t nodeId = db.getHeadNodeId(txn);
-        std::cout << "Root: " << quadrable::renderNode(txn, db, nodeId) << std::endl;
+        std::cout << "Root: " << quadrable::renderNode(db, txn, nodeId) << std::endl;
     } else if (args["proof"].asBool()) {
         std::string k = args["<key>"].asString();
         // FIXME
@@ -253,7 +291,7 @@ void parse_command_line(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     try {
-        parse_command_line(argc, argv);
+        run(argc, argv);
     } catch (std::exception &e) {
         std::cerr << "quadb error: " << e.what() << std::endl;
         ::exit(1);
