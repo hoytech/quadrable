@@ -7,13 +7,13 @@ INCS     = -Iinclude -Iexternal -Iexternal/hoytech-cpp -Iexternal/docopt.cpp
 LDLIBS   = -l:liblmdb.a -pthread
 LDFLAGS  = -flto $(XLDFLAGS)
 
-CHECK_SRCS     = check.cpp external/hoytech-cpp/hex.cpp
-TOOL_SRCS     = quadb.cpp external/hoytech-cpp/hex.cpp
+CHECK_SRCS = check.cpp external/hoytech-cpp/hex.cpp
+TOOL_SRCS  = quadb.cpp external/hoytech-cpp/hex.cpp
 
 
-CHECK_OBJS    := $(CHECK_SRCS:.cpp=.o)
-TOOL_OBJS    := $(TOOL_SRCS:.cpp=.o)
-DEPS    := $(CHECK_SRCS:.cpp=.d) $(TOOL_SRCS:.cpp=.d)
+CHECK_OBJS := $(CHECK_SRCS:.cpp=.o)
+TOOL_OBJS  := $(TOOL_SRCS:.cpp=.o)
+DEPS       := $(CHECK_SRCS:.cpp=.d) $(TOOL_SRCS:.cpp=.d)
 
 
 .PHONY: phony
@@ -26,14 +26,14 @@ check: $(CHECK_OBJS) $(DEPS)
 quadb: $(TOOL_OBJS) $(DEPS)
 	$(CXX) $(TOOL_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
-%.o : %.cpp %.d
+%.o: %.cpp %.d
 	$(CXX) $(CXXFLAGS) $(INCS) -MMD -MP -MT $@ -MF $*.d -c $< -o $@
 
 quadb.o: XCXXFLAGS += -DDOCOPT_HEADER_ONLY -DQUADRABLE_VERSION='"'`git describe --tags`'"'
 
 -include *.d
 
-%.d : ;
+%.d: ;
 
 clean: phony
 	rm -rf quadb check *.o *.d testdb/ *.gcda *.gcno coverage.lcov coverage-report/

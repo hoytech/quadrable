@@ -137,13 +137,4 @@ static inline void dumpProof(Proof &p) {
 }
 
 
-static inline void dumpProofSimple(std::vector<std::string> &proof) {
-    for (auto &p : proof) {
-        std::cout << to_hex(p, true) << "\n";
-    }
-
-    std::cout << std::flush;
-}
-
-
 }
