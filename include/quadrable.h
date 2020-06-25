@@ -155,6 +155,7 @@ struct ProofElem {
     uint64_t depth;
     std::string keyHash;
     std::string val;  // Type::Leaf: value, Type::WitnessLeaf: hash(value), Type::WitnessEmpty: ignored
+    std::string key;  // Type::Leaf: key (if available), Type::Witness*: ignored
 };
 
 struct ProofCmd {
@@ -376,11 +377,13 @@ class Quadrable {
         UpdateSet(Quadrable *db_) : db(db_) {}
 
         UpdateSet &put(std::string_view keyRaw, std::string_view val) {
+            if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
             map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(db->trackKeys ? keyRaw : ""), std::string(val), false, false});
             return *this;
         }
 
         UpdateSet &del(std::string_view keyRaw) {
+            if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
             map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(keyRaw), "", true, false});
             return *this;
         }
@@ -448,7 +451,7 @@ class Quadrable {
             }
         }
 
-        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, std::string_view val, uint64_t depth) {
+        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, std::string_view val, uint64_t depth, std::string_view leafKey = "") {
             BuiltNode output;
 
             {
@@ -474,6 +477,8 @@ class Quadrable {
             output.nodeId = db->writeNodeToDb(txn, nodeRaw);
             output.nodeType = NodeType::Leaf;
 
+            db->setLeafKey(txn, output.nodeId, leafKey);
+
             return output;
         }
 
@@ -481,8 +486,7 @@ class Quadrable {
             if (it->second.witness) {
                 return newWitnessLeaf(db, txn, it->first, Hash::existingHash(it->second.val), depth);
             } else {
-                auto leaf = newLeaf(db, txn, it->first, it->second.val, depth);
-                if (db->trackKeys) db->setLeafKey(txn, leaf.nodeId, it->second.key);
+                auto leaf = newLeaf(db, txn, it->first, it->second.val, depth, it->second.key);
                 return leaf;
             }
         }
@@ -591,7 +595,7 @@ class Quadrable {
 
     Update makeUpdateFromNode(lmdb::txn &txn, ParsedNode &node) {
         if (node.nodeType == NodeType::Leaf) {
-            std::string_view leafKey = "";
+            std::string_view leafKey;
             if (trackKeys) getLeafKey(txn, node.nodeId, leafKey);
             return Update{std::string(leafKey), std::string(node.leafVal()), false, false};
         } else if (node.nodeType == NodeType::WitnessLeaf) {
@@ -607,7 +611,7 @@ class Quadrable {
     }
 
     void setLeafKey(lmdb::txn &txn, uint64_t nodeId, std::string_view leafKey) {
-        if (!trackKeys) return;
+        if (!trackKeys || leafKey.size() == 0) return;
         dbi_key.put(txn, lmdb::to_sv<uint64_t>(nodeId), leafKey);
     }
 
@@ -863,10 +867,13 @@ class Quadrable {
                     throw quaderr("incomplete tree, missing leaf to make proof");
                 }
 
+                std::string_view leafKey;
+                getLeafKey(txn, node.nodeId, leafKey);
+
                 items.emplace_back(ProofGenItem{
                     nodeId,
                     parentNodeId,
-                    ProofElem{ ProofElem::Type::Leaf, depth, std::string(node.leafKeyHash()), std::string(node.leafVal()), },
+                    ProofElem{ ProofElem::Type::Leaf, depth, std::string(node.leafKeyHash()), std::string(node.leafVal()), std::string(leafKey) },
                 });
             } else {
                 items.emplace_back(ProofGenItem{
@@ -1007,7 +1014,7 @@ class Quadrable {
             auto next = static_cast<ssize_t>(i+1);
 
             if (elem.proofType == ProofElem::Type::Leaf) {
-                auto info = BuiltNode::newLeaf(this, txn, keyHash, elem.val, elem.depth);
+                auto info = BuiltNode::newLeaf(this, txn, keyHash, elem.val, elem.depth, elem.key);
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
             } else if (elem.proofType == ProofElem::Type::WitnessLeaf) {
                 auto info = BuiltNode::newWitnessLeaf(this, txn, keyHash, Hash::existingHash(elem.val), elem.depth);

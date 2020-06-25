@@ -110,6 +110,7 @@ static inline void dumpProof(Proof &p) {
         std::cout << "    " << proofType << "  depth=" << elem.depth << "\n";
 
         if (elem.proofType == ProofElem::Type::Leaf) {
+            if (elem.key.size()) std::cout << "    Key: " << elem.key << "\n";
             std::cout << "    Val: " << elem.val << "\n";
         } else if (elem.proofType == ProofElem::Type::WitnessLeaf) {
             std::cout << "    Val hash: " << to_hex(elem.val, true) << "\n";

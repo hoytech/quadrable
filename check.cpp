@@ -27,6 +27,8 @@ void doTests() {
 
     quadrable::Quadrable db;
 
+    //db.trackKeys = true;
+
     {
         auto txn = lmdb::txn::begin(lmdb_env, nullptr, 0);
         db.init(txn);
@@ -101,6 +103,11 @@ void doTests() {
         verify(stats.numLeafNodes == 1);
     });
 
+
+    test("zero-length keys", [&]{
+        verifyThrow(db.change().put("", "1").apply(txn), "zero-length keys not allowed");
+        verifyThrow(db.change().del("").apply(txn), "zero-length keys not allowed");
+    });
 
 
     test("overwriting updates before apply", [&]{
