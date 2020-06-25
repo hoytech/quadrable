@@ -4,13 +4,13 @@ Quadrable is an authenticated multi-version embedded database. It is implemented
 
 ## Introduction
 
-* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will generate a new root. Anyone who knows a root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides "proofs" along with the responses, which are compared against the root to authenticate the query results.
-* *Multi-version*: Many different versions of the database can exist at the same time. Versions that are derived from other versions don't require copying the entire database. Instead, all of the data that is common between the versions is shared. With this "copy-on-write" functionality, database snapshots or checkpoints are very inexpensive so they can be used liberally, and for many purposes.
-* *Embedded*: The main functionality exists in a C++ header-only library intended to be used by applications such as the `quadb` command-line tool. Quadrable uses [LMDB](https://symas.com/lmdb/), an efficient database library which embeds the entire database into your process by memory-mapping a file.
+* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will generate a new root. Anyone who knows a root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides "proofs" along with the responses, which are validated against the root.
+* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This "copy-on-write" behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally and for many purposes.
+* *Embedded*: The main functionality exists in a C++ header-only library intended to be used by applications such as the `quadb` command-line tool. Quadrable uses [LMDB](https://symas.com/lmdb/), an efficient database library which embeds the database's backing storage into your process by memory-mapping a file.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
-* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication. See my presentation on merkle trees for a detailed overview FIXME: link.
+* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication. See my presentation on merkle trees for a detailed overview FIXME: link.
 * *Binary*: This style of merkle tree combines together exactly two nodes to create the node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs, as described in FIXME.
 * *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that keys must be in a sequence, say 1 through N (with no gaps). This opens the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) key-space.
 
@@ -104,6 +104,28 @@ If we run `status` again, we can see the root has changed back to the all-zeros 
     Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
 This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order in which records were inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting roots.
+
+### quadb import
+
+If you wish to insert multiple records into the DB, running `quadb put` multiple times is inefficient. This is because each time it is run it will need to discard and create new intermediate nodes.
+
+A better way to do it is to use `quadb import` which can put multiple records with a single traversal of the tree. This command reads comma-separated `key,value` pairs standard input, one per line. The separator can be changed with the `--sep` option. On success there is no output:
+
+    $ perl -E 'for my $i (1..1000) { say "key $i,value $i" }' | quadb import
+
+### quadb export
+
+This is the complement to `quadb import`. It dumps the contents of the database as a comma-separated (again, customisable with `--sep`) list of lines:
+
+    $ quadb export|head
+    key 915,value 915
+    key 116,value 116
+    key 134,value 134
+    key 957,value 957
+    key 459,value 459
+    ...
+
+Note that the output is *not* sorted by the key. It is sorted by the hash of the key, because that is the way records are stored in the tree (FIXME see section on adversarial). You can pipe this output to the `sort` command if you would like it sorted by key.
 
 ### quadb head
 
