@@ -164,7 +164,7 @@ struct ProofCmd {
         Merge = 2,
     } op;
     uint64_t nodeOffset;
-    Hash h; // HashProvided cmds only
+    std::string hash; // HashProvided ops only
 };
 
 struct Proof {
@@ -937,7 +937,7 @@ class Quadrable {
                     auto nextParent = next.nodeId ? reverseMap[next.nodeId] : items[curr.next].parentNodeId;
 
                     if (currParent == nextParent) {
-                        curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::Merge, static_cast<uint64_t>(i), Hash::nullHash(), });
+                        curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::Merge, static_cast<uint64_t>(i), });
                         next.mergedOrder = currMergeOrder++;
                         curr.next = next.next;
                         curr.nodeId = currParent;
@@ -951,9 +951,9 @@ class Quadrable {
 
                 if (siblingNodeId) {
                     ParsedNode siblingNode(txn, dbi_node, siblingNodeId);
-                    curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashProvided, static_cast<uint64_t>(i), Hash::existingHash(siblingNode.nodeHash()), });
+                    curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashProvided, static_cast<uint64_t>(i), std::string(siblingNode.nodeHash()), });
                 } else {
-                    curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashEmpty, static_cast<uint64_t>(i), Hash::nullHash(), });
+                    curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashEmpty, static_cast<uint64_t>(i), });
                 }
 
                 curr.nodeId = currParent;
@@ -1032,7 +1032,7 @@ class Quadrable {
             BuiltNode siblingInfo;
 
             if (cmd.op == ProofCmd::Op::HashProvided) {
-                siblingInfo = BuiltNode::newWitness(this, txn, cmd.h);
+                siblingInfo = BuiltNode::newWitness(this, txn, Hash::existingHash(cmd.hash));
             } else if (cmd.op == ProofCmd::Op::HashEmpty) {
                 siblingInfo = BuiltNode::empty();
             } else if (cmd.op == ProofCmd::Op::Merge) {
@@ -1237,47 +1237,6 @@ class Quadrable {
     bool detachedHead = false;
     uint64_t detachedHeadNodeId = 0;
 };
-
-
-
-
-
-static inline bool verifyProofBasic(std::string_view root, std::string_view key, std::string_view val, std::vector<std::string> &proof) {
-    if (proof.size() > 200) throw quaderr("proof size unreasonably large: ", proof.size());
-
-    Hash keyHash = Hash::hash(key);
-    Hash nodeHash;
-
-    Keccak k;
-
-    {
-        Hash valHash = Hash::hash(val);
-        unsigned char depthChar = static_cast<unsigned char>(proof.size());
-
-        k.add(keyHash.sv());
-        k.add(&depthChar, 1);
-        k.add(valHash.sv());
-
-        k.getHash(nodeHash.data);
-    }
-
-    for (int depth = static_cast<int>(proof.size()) - 1; depth >= 0; depth--) {
-        k.reset();
-
-        if (keyHash.getBit(depth)) {
-            k.add(proof[depth]);
-            k.add(nodeHash.sv());
-        } else {
-            k.add(nodeHash.sv());
-            k.add(proof[depth]);
-        }
-
-        k.getHash(nodeHash.data);
-    }
-
-    return nodeHash == root;
-}
-
 
 
 

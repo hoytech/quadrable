@@ -129,7 +129,7 @@ static inline void dumpProof(Proof &p) {
         std::cout << "  CMD " << i << ": " << op << " -> " << cmd.nodeOffset << "\n";
 
         if (cmd.op == ProofCmd::Op::HashProvided) {
-            std::cout << "    Sibling hash: " << to_hex(cmd.h.sv(), true) << "\n";
+            std::cout << "    Sibling hash: " << to_hex(cmd.hash, true) << "\n";
         }
     }
 
