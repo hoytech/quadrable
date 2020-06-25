@@ -6,13 +6,13 @@ Quadrable is an authenticated multi-version embedded database. It is implemented
 
 * *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will generate a new root. Anyone who knows a root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides "proofs" along with the responses, which are validated against the root.
 * *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This "copy-on-write" behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally and for many purposes.
-* *Embedded*: The main functionality exists in a C++ header-only library intended to be used by applications such as the `quadb` command-line tool. Quadrable uses [LMDB](https://symas.com/lmdb/), an efficient database library which embeds the database's backing storage into your process by memory-mapping a file.
+* *Embedded*: Quadrable's main functionality is in a C++ header-only library that is intended to be used by applications such as the `quadb` command-line tool. For persistent storage, it uses [LMDB](https://symas.com/lmdb/), an efficient database library that embeds the backing storage into your process by memory-mapping a file.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
 * *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication. See my presentation on merkle trees for a detailed overview FIXME: link.
-* *Binary*: This style of merkle tree combines together exactly two nodes to create the node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs, as described in FIXME.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that keys must be in a sequence, say 1 through N (with no gaps). This opens the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) key-space.
+* *Binary*: The style of merkle tree used by Quadrable combines together exactly two nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs, as described in FIXME.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leafs must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that hashes of the database keys can correspond directly to each leaf's location in the tree.
 
 
 ## Building
@@ -111,13 +111,13 @@ If you wish to insert multiple records into the DB, running `quadb put` multiple
 
 A better way to do it is to use `quadb import` which can put multiple records with a single traversal of the tree. This command reads comma-separated `key,value` pairs standard input, one per line. The separator can be changed with the `--sep` option. On success there is no output:
 
-    $ perl -E 'for my $i (1..1000) { say "key $i,value $i" }' | quadb import
+    $ perl -E 'for $i (1..1000) { say "key $i,value $i" }' | quadb import
 
 ### quadb export
 
 This is the complement to `quadb import`. It dumps the contents of the database as a comma-separated (again, customisable with `--sep`) list of lines:
 
-    $ quadb export|head
+    $ quadb export
     key 915,value 915
     key 116,value 116
     key 134,value 134
