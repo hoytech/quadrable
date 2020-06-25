@@ -857,7 +857,7 @@ class Quadrable {
                 parentNodeId,
                 ProofElem{ ProofElem::Type::WitnessEmpty, depth, h.str(), },
             });
-        } else if (node.nodeType == NodeType::Leaf || node.nodeType == NodeType::WitnessLeaf) {
+        } else if (node.isLeaf()) {
             if (std::any_of(begin, end, [&](auto &i){ return i.first == node.leafKeyHash(); })) {
                 if (node.nodeType == NodeType::WitnessLeaf) {
                     throw quaderr("incomplete tree, missing leaf to make proof");
@@ -897,14 +897,17 @@ class Quadrable {
     }
 
     struct GenProofItemAccum {
+        size_t index;
         uint64_t depth;
         uint64_t nodeId;
         ssize_t next;
+
+        uint64_t mergedOrder = 0;
+        std::vector <ProofCmd> proofCmds;
     };
 
     std::vector<ProofCmd> generateProofCmds(lmdb::txn &txn, ProofGenItems &items, ProofReverseNodeMap &reverseMap, uint64_t headNodeId) {
-        std::vector<ProofCmd> proofCmds;
-        if (items.size() == 0) return proofCmds;
+        if (items.size() == 0) return {};
 
         std::vector<GenProofItemAccum> accums;
         uint64_t maxDepth = 0;
@@ -912,11 +915,12 @@ class Quadrable {
         for (size_t i = 0; i < items.size(); i++) {
             auto &item = items[i];
             maxDepth = std::max(maxDepth, item.elem.depth);
-            accums.emplace_back(GenProofItemAccum{ item.elem.depth, item.nodeId, static_cast<ssize_t>(i+1), });
+            accums.emplace_back(GenProofItemAccum{ i, item.elem.depth, item.nodeId, static_cast<ssize_t>(i+1), });
         }
 
         accums.back().next = -1;
         uint64_t currDepth = maxDepth;
+        uint64_t currMergeOrder = 0;
 
         // Complexity: O(N*D) = O(N*log(N))
 
@@ -933,7 +937,8 @@ class Quadrable {
                     auto nextParent = next.nodeId ? reverseMap[next.nodeId] : items[curr.next].parentNodeId;
 
                     if (currParent == nextParent) {
-                        proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::Merge, static_cast<uint64_t>(i), Hash::nullHash(), });
+                        curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::Merge, static_cast<uint64_t>(i), Hash::nullHash(), });
+                        next.mergedOrder = currMergeOrder++;
                         curr.next = next.next;
                         curr.nodeId = currParent;
                         curr.depth--;
@@ -946,9 +951,9 @@ class Quadrable {
 
                 if (siblingNodeId) {
                     ParsedNode siblingNode(txn, dbi_node, siblingNodeId);
-                    proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashProvided, static_cast<uint64_t>(i), Hash::existingHash(siblingNode.nodeHash()), });
+                    curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashProvided, static_cast<uint64_t>(i), Hash::existingHash(siblingNode.nodeHash()), });
                 } else {
-                    proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashEmpty, static_cast<uint64_t>(i), Hash::nullHash(), });
+                    curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashEmpty, static_cast<uint64_t>(i), Hash::nullHash(), });
                 }
 
                 curr.nodeId = currParent;
@@ -959,6 +964,14 @@ class Quadrable {
         assert(accums[0].depth == 0);
         assert(accums[0].nodeId == headNodeId);
         assert(accums[0].next == -1);
+        accums[0].mergedOrder = currMergeOrder;
+
+        std::sort(accums.begin(), accums.end(), [](auto &a, auto &b){ return a.mergedOrder < b.mergedOrder; });
+
+        std::vector<ProofCmd> proofCmds;
+        for (auto &a : accums) {
+            proofCmds.insert(proofCmds.end(), a.proofCmds.begin(), a.proofCmds.end());
+        }
 
         return proofCmds;
     }
