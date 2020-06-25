@@ -202,106 +202,12 @@ enum class NodeType {
     Leaf = 4,
     Witness = 5,
     WitnessLeaf = 6,
+    Invalid = 15,
 };
 
 
-static inline std::string buildNodeEmpty() {
-    return std::string(40, '\0');
-}
 
-static inline std::string buildNodeLeaf(const Hash &keyHash, std::string_view val, uint64_t depth) {
-    Hash nodeHash;
-
-    {
-        Hash valHash = Hash::hash(val);
-        unsigned char depthChar = static_cast<unsigned char>(depth);
-
-        Keccak k;
-
-        k.add(keyHash.sv());
-        k.add(&depthChar, 1);
-        k.add(valHash.sv());
-
-        k.getHash(nodeHash.data);
-    }
-
-    std::string o;
-
-    o += lmdb::to_sv<uint64_t>(uint64_t(NodeType::Leaf));
-    o += nodeHash.sv();
-    o += keyHash.sv();
-    o += val;
-
-    return o;
-}
-
-static inline std::string buildNodeBranch(uint64_t leftNodeId, uint64_t rightNodeId, Hash &leftHash, Hash &rightHash) {
-    Hash nodeHash;
-
-    {
-        Keccak k;
-        k.add(leftHash.data, sizeof(leftHash.data));
-        k.add(rightHash.data, sizeof(rightHash.data));
-        k.getHash(nodeHash.data);
-    }
-
-    std::string o;
-
-    uint64_t w1;
-
-    if (rightNodeId == 0) {
-        w1 = uint64_t(NodeType::BranchLeft) | leftNodeId << 8;
-    } else if (leftNodeId == 0) {
-        w1 = uint64_t(NodeType::BranchRight) | rightNodeId << 8;
-    } else {
-        w1 = uint64_t(NodeType::BranchBoth) | leftNodeId << 8;
-    }
-
-    o += lmdb::to_sv<uint64_t>(w1);
-    o += nodeHash.sv();
-
-    if (rightNodeId && leftNodeId) {
-        o += lmdb::to_sv<uint64_t>(rightNodeId);
-    }
-
-    return o;
-}
-
-static inline std::string buildNodeWitness(const Hash &hash) {
-    std::string o;
-
-    o += lmdb::to_sv<uint64_t>(uint64_t(NodeType::Witness));
-    o += hash.sv();
-
-    return o;
-}
-
-static inline std::string buildNodeWitnessLeaf(const Hash &keyHash, const Hash &valHash, uint64_t depth) {
-    Hash nodeHash;
-
-    {
-        unsigned char depthChar = static_cast<unsigned char>(depth);
-
-        Keccak k;
-
-        k.add(keyHash.sv());
-        k.add(&depthChar, 1);
-        k.add(valHash.sv());
-
-        k.getHash(nodeHash.data);
-    }
-
-    std::string o;
-
-    o += lmdb::to_sv<uint64_t>(uint64_t(NodeType::WitnessLeaf));
-    o += nodeHash.sv();
-    o += keyHash.sv();
-    o += valHash.sv();
-
-    return o;
-}
-
-
+// ParsedNode holds a string_view into the DB, so it shouldn't be held after modifying the DB/ending the transaction
 
 class ParsedNode {
   public:
@@ -310,8 +216,9 @@ class ParsedNode {
     std::string_view raw;
     uint64_t leftNodeId = 0;
     uint64_t rightNodeId = 0;
+    uint64_t nodeId;
 
-    ParsedNode(lmdb::txn &txn, lmdb::dbi &dbi_node, uint64_t nodeId) {
+    ParsedNode(lmdb::txn &txn, lmdb::dbi &dbi_node, uint64_t nodeId_) : nodeId(nodeId_) {
         if (nodeId == 0) {
             nodeType = NodeType::Empty;
             return;
@@ -456,6 +363,9 @@ class Quadrable {
 
 
 
+
+
+
     class UpdateSet {
       friend class Quadrable;
 
@@ -500,22 +410,154 @@ class Quadrable {
         apply(txn, *updatesOrig);
     }
 
-    struct PutNodeInfo {
+    class BuiltNode {
+      friend class Quadrable;
+
+      public:
         uint64_t nodeId;
         Hash nodeHash;
         NodeType nodeType;
+
+        static BuiltNode empty() {
+            return {0, Hash::nullHash(), NodeType::Empty};
+        }
+
+        static BuiltNode reuse(ParsedNode &node) {
+            return {node.nodeId, Hash::existingHash(node.nodeHash()), node.nodeType};
+        }
+
+        static BuiltNode existing(uint64_t nodeId, const Hash &nodeHash, NodeType nodeType = NodeType::Invalid) {
+            return {nodeId, nodeHash, nodeType};
+        }
+
+        static BuiltNode copyLeaf(Quadrable *db, lmdb::txn &txn, ParsedNode &node, uint64_t depth) {
+            if (node.nodeType == NodeType::Leaf) {
+                return newLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), node.leafVal(), depth);
+            } else if (node.nodeType == NodeType::WitnessLeaf) {
+                return newWitnessLeaf(db, txn, Hash::existingHash(node.leafKeyHash()), Hash::existingHash(node.leafValHash()), depth);
+            } else {
+                throw quaderr("tried to copyLeaf on a non-leaf");
+            }
+        }
+
+        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, std::string_view val, uint64_t depth) {
+            BuiltNode output;
+
+            {
+                Hash valHash = Hash::hash(val);
+                unsigned char depthChar = static_cast<unsigned char>(depth);
+
+                Keccak k;
+
+                k.add(keyHash.sv());
+                k.add(&depthChar, 1);
+                k.add(valHash.sv());
+
+                k.getHash(output.nodeHash.data);
+            }
+
+            std::string nodeRaw;
+
+            nodeRaw += lmdb::to_sv<uint64_t>(uint64_t(NodeType::Leaf));
+            nodeRaw += output.nodeHash.sv();
+            nodeRaw += keyHash.sv();
+            nodeRaw += val;
+
+            output.nodeId = db->writeNodeToDb(txn, nodeRaw);
+            output.nodeType = NodeType::Leaf;
+
+            return output;
+        }
+
+        static BuiltNode newWitnessLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, const Hash &valHash, uint64_t depth) {
+            BuiltNode output;
+
+            {
+                unsigned char depthChar = static_cast<unsigned char>(depth);
+
+                Keccak k;
+
+                k.add(keyHash.sv());
+                k.add(&depthChar, 1);
+                k.add(valHash.sv());
+
+                k.getHash(output.nodeHash.data);
+            }
+
+            std::string nodeRaw;
+
+            nodeRaw += lmdb::to_sv<uint64_t>(uint64_t(NodeType::WitnessLeaf));
+            nodeRaw += output.nodeHash.sv();
+            nodeRaw += keyHash.sv();
+            nodeRaw += valHash.sv();
+
+            output.nodeId = db->writeNodeToDb(txn, nodeRaw);
+            output.nodeType = NodeType::WitnessLeaf;
+
+            return output;
+        }
+
+        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, UpdateSetMap::iterator it, uint64_t depth) {
+            if (it->second.witness) {
+                return newWitnessLeaf(db, txn, it->first, Hash::existingHash(it->second.val), depth);
+            } else {
+                return newLeaf(db, txn, it->first, it->second.val, depth);
+            }
+        }
+
+        static BuiltNode newBranch(Quadrable *db, lmdb::txn &txn, uint64_t leftNodeId, uint64_t rightNodeId, Hash &leftHash, Hash &rightHash) {
+            BuiltNode output;
+
+            {
+                Keccak k;
+                k.add(leftHash.data, sizeof(leftHash.data));
+                k.add(rightHash.data, sizeof(rightHash.data));
+                k.getHash(output.nodeHash.data);
+            }
+
+            std::string nodeRaw;
+
+            uint64_t w1;
+
+            if (rightNodeId == 0) {
+                output.nodeType = NodeType::BranchLeft;
+                w1 = uint64_t(NodeType::BranchLeft) | leftNodeId << 8;
+            } else if (leftNodeId == 0) {
+                output.nodeType = NodeType::BranchRight;
+                w1 = uint64_t(NodeType::BranchRight) | rightNodeId << 8;
+            } else {
+                output.nodeType = NodeType::BranchBoth;
+                w1 = uint64_t(NodeType::BranchBoth) | leftNodeId << 8;
+            }
+
+            nodeRaw += lmdb::to_sv<uint64_t>(w1);
+            nodeRaw += output.nodeHash.sv();
+
+            if (rightNodeId && leftNodeId) {
+                nodeRaw += lmdb::to_sv<uint64_t>(rightNodeId);
+            }
+
+            output.nodeId = db->writeNodeToDb(txn, nodeRaw);
+
+            return output;
+        }
+
+        static BuiltNode newWitness(Quadrable *db, lmdb::txn &txn, const Hash &hash) {
+            std::string nodeRaw;
+
+            nodeRaw += lmdb::to_sv<uint64_t>(uint64_t(NodeType::Witness));
+            nodeRaw += hash.sv();
+
+            BuiltNode output;
+
+            output.nodeId = db->writeNodeToDb(txn, nodeRaw);
+            output.nodeHash = hash;
+            output.nodeType = NodeType::BranchBoth;
+
+            return output;
+        }
     };
 
-    PutNodeInfo putNode(lmdb::txn &txn, std::string_view nodeRaw) {
-        if (nodeRaw.size() < 40) throw quaderr("nodeRaw too short");
-        uint64_t newNodeId = getNextIntegerKey(txn, dbi_node);
-        dbi_node.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);
-
-        // FIXME: can we merge buildNodeX and putNode to avoid this DB lookup?
-        ParsedNode node(txn, dbi_node, newNodeId);
-
-        return PutNodeInfo{newNodeId, Hash::existingHash(nodeRaw.substr(8, 32)), node.nodeType};
-    }
 
     void apply(lmdb::txn &txn, UpdateSet &updatesOrig) {
         // If exception is thrown, updatesOrig could be in inconsistent state, so ensure it's cleared
@@ -537,31 +579,14 @@ class Quadrable {
         change().del(key).apply(txn);
     }
 
-    PutNodeInfo putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp) {
+    BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp) {
         ParsedNode node(txn, dbi_node, nodeId);
-
-        auto reuseNode = [&]{
-            return PutNodeInfo{nodeId, Hash::existingHash(node.nodeHash()), node.nodeType};
-        };
-
-        auto emptyNode = [&]{
-            return PutNodeInfo{0, Hash::nullHash(), NodeType::Empty};
-        };
-
-        auto putLeaf = [&](const Hash &keyHash, std::string_view val, uint64_t depth, bool isWitness){
-            if (isWitness) {
-                return putNode(txn, buildNodeWitnessLeaf(keyHash, Hash::existingHash(val), depth));
-            } else {
-                return putNode(txn, buildNodeLeaf(keyHash, val, depth));
-            }
-        };
-
         bool didBubble = false;
 
         // recursion base cases
 
         if (begin == end) {
-            return reuseNode();
+            return BuiltNode::reuse(node);
         }
 
         if (node.nodeType == NodeType::Witness) {
@@ -571,11 +596,11 @@ class Quadrable {
 
             if (begin == end) {
                 // All updates for this sub-tree were deletions for keys that don't exist, so do nothing.
-                return reuseNode();
+                return BuiltNode::reuse(node);
             }
 
             if (std::next(begin) == end) {
-                return putLeaf(begin->first, begin->second.val, depth, begin->second.witness);
+                return BuiltNode::newLeaf(this, txn, begin, depth);
             }
         } else if (node.nodeType == NodeType::Leaf || node.nodeType == NodeType::WitnessLeaf) {
             if (std::next(begin) == end && begin->first == node.leafKeyHash()) {
@@ -583,15 +608,15 @@ class Quadrable {
 
                 if (begin->second.deletion) {
                     bubbleUp = true;
-                    return emptyNode();
+                    return BuiltNode::empty();
                 }
 
                 if (node.nodeType == NodeType::Leaf && begin->second.val == node.leafVal()) {
                     // No change to this leaf, so do nothing. Don't do this for WitnessLeaf nodes, since we need to upgrade them to Leafs.
-                    return reuseNode();
+                    return BuiltNode::reuse(node);
                 }
 
-                return putLeaf(begin->first, begin->second.val, depth, begin->second.witness);
+                return BuiltNode::newLeaf(this, txn, begin, depth);
             }
 
             bool deleteThisLeaf = false;
@@ -608,10 +633,10 @@ class Quadrable {
                 if (deleteThisLeaf) {
                     // The only update for this sub-tree was to delete this key
                     bubbleUp = true;
-                    return emptyNode();
+                    return BuiltNode::empty();
                 }
                 // All updates for this sub-tree were deletions for keys that don't exist, so do nothing.
-                return reuseNode();
+                return BuiltNode::reuse(node);
             }
 
             // The leaf needs to get split into a branch, so add it into our update set to get added further down (unless it itself was deleted).
@@ -641,8 +666,8 @@ class Quadrable {
 
         checkDepth(depth);
 
-        PutNodeInfo leftNode = putAux(txn, depth+1, node.leftNodeId, updates, begin, middle, didBubble);
-        PutNodeInfo rightNode = putAux(txn, depth+1, node.rightNodeId, updates, middle, end, didBubble);
+        auto leftNode = putAux(txn, depth+1, node.leftNodeId, updates, begin, middle, didBubble);
+        auto rightNode = putAux(txn, depth+1, node.rightNodeId, updates, middle, end, didBubble);
 
         if (didBubble) {
             if (leftNode.nodeType == NodeType::Witness || rightNode.nodeType == NodeType::Witness) {
@@ -650,23 +675,21 @@ class Quadrable {
                 throw quaderr("can't bubble a witness node");
             } else if (leftNode.nodeType == NodeType::Empty && rightNode.nodeType == NodeType::Empty) {
                 bubbleUp = true;
-                return emptyNode();
+                return BuiltNode::empty();
             } else if ((leftNode.nodeType == NodeType::Leaf || leftNode.nodeType == NodeType::WitnessLeaf) && rightNode.nodeType == NodeType::Empty) {
                 ParsedNode n(txn, dbi_node, leftNode.nodeId);
                 bubbleUp = true;
-                if (n.nodeType == NodeType::Leaf) return putLeaf(Hash::existingHash(n.leafKeyHash()), n.leafVal(), depth, false);
-                else return putLeaf(Hash::existingHash(n.leafKeyHash()), n.leafValHash(), depth, true);
+                return BuiltNode::copyLeaf(this, txn, n, depth);
             } else if (leftNode.nodeType == NodeType::Empty && (rightNode.nodeType == NodeType::Leaf || rightNode.nodeType == NodeType::WitnessLeaf)) {
                 ParsedNode n(txn, dbi_node, rightNode.nodeId);
                 bubbleUp = true;
-                if (n.nodeType == NodeType::Leaf) return putLeaf(Hash::existingHash(n.leafKeyHash()), n.leafVal(), depth, false);
-                else return putLeaf(Hash::existingHash(n.leafKeyHash()), n.leafValHash(), depth, true);
+                return BuiltNode::copyLeaf(this, txn, n, depth);
             }
 
             // One of the nodes is a branch, or both are leaves, so bubbling can stop
         }
 
-        return putNode(txn, buildNodeBranch(leftNode.nodeId, rightNode.nodeId, leftNode.nodeHash, rightNode.nodeHash));
+        return BuiltNode::newBranch(this, txn, leftNode.nodeId, rightNode.nodeId, leftNode.nodeHash, rightNode.nodeHash);
     }
 
 
@@ -931,7 +954,7 @@ class Quadrable {
         setHeadNodeId(txn, rootNode.nodeId);
     }
 
-    PutNodeInfo importProof(lmdb::txn &txn, Proof &proof) {
+    BuiltNode importProof(lmdb::txn &txn, Proof &proof) {
         if (getHeadNodeId(txn)) throw quaderr("can't importProof into existing head");
 
         std::vector<ImportProofItemAccum> accums;
@@ -942,10 +965,10 @@ class Quadrable {
             auto next = static_cast<ssize_t>(i+1);
 
             if (elem.proofType == ProofElem::Type::Leaf) {
-                auto info = putNode(txn, buildNodeLeaf(keyHash, elem.val, elem.depth));
+                auto info = BuiltNode::newLeaf(this, txn, keyHash, elem.val, elem.depth);
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
             } else if (elem.proofType == ProofElem::Type::WitnessLeaf) {
-                auto info = putNode(txn, buildNodeWitnessLeaf(keyHash, Hash::existingHash(elem.val), elem.depth));
+                auto info = BuiltNode::newWitnessLeaf(this, txn, keyHash, Hash::existingHash(elem.val), elem.depth);
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
             } else if (elem.proofType == ProofElem::Type::WitnessEmpty) {
                 accums.emplace_back(ImportProofItemAccum{ elem.depth, 0, next, keyHash, Hash::nullHash(), });
@@ -964,12 +987,12 @@ class Quadrable {
             if (accum.merged) throw quaderr("element already merged");
             if (accum.depth == 0) throw quaderr("node depth underflow");
 
-            PutNodeInfo siblingInfo;
+            BuiltNode siblingInfo;
 
             if (cmd.op == ProofCmd::Op::HashProvided) {
-                siblingInfo = putNode(txn, buildNodeWitness(cmd.h));
+                siblingInfo = BuiltNode::newWitness(this, txn, cmd.h);
             } else if (cmd.op == ProofCmd::Op::HashEmpty) {
-                siblingInfo = PutNodeInfo{ 0, Hash::nullHash(), NodeType::Empty, };
+                siblingInfo = BuiltNode::empty();
             } else if (cmd.op == ProofCmd::Op::Merge) {
                 if (accum.next < 0) throw quaderr("no nodes left to merge with");
                 auto &accumNext = accums[accum.next];
@@ -979,19 +1002,18 @@ class Quadrable {
                 accum.next = accumNext.next;
                 accumNext.merged = true;
 
-                siblingInfo = PutNodeInfo{ accumNext.nodeId, accumNext.nodeHash, NodeType::Empty, }; // FIXME: nodeType doesn't matter here, Empty is placeholder
+                siblingInfo = BuiltNode::existing(accumNext.nodeId, accumNext.nodeHash);
             } else {
                 throw quaderr("unrecognized ProofCmd op: ", int(cmd.op));
             }
 
-            std::string branch;
-            if (cmd.op == ProofCmd::Op::Merge || !accum.keyHash.getBit(accum.depth - 1)) {
-                branch = buildNodeBranch(accum.nodeId, siblingInfo.nodeId, accum.nodeHash, siblingInfo.nodeHash);
-            } else {
-                branch = buildNodeBranch(siblingInfo.nodeId, accum.nodeId, siblingInfo.nodeHash, accum.nodeHash);
-            }
+            BuiltNode branchInfo;
 
-            auto branchInfo = putNode(txn, branch);
+            if (cmd.op == ProofCmd::Op::Merge || !accum.keyHash.getBit(accum.depth - 1)) {
+                branchInfo = BuiltNode::newBranch(this, txn, accum.nodeId, siblingInfo.nodeId, accum.nodeHash, siblingInfo.nodeHash);
+            } else {
+                branchInfo = BuiltNode::newBranch(this, txn, siblingInfo.nodeId, accum.nodeId, siblingInfo.nodeHash, accum.nodeHash);
+            }
 
             accum.depth--;
             accum.nodeId = branchInfo.nodeId;
@@ -1001,8 +1023,7 @@ class Quadrable {
         if (accums[0].next != -1) throw quaderr("not all proof elems were merged");
         if (accums[0].depth != 0) throw quaderr("proof didn't reach root");
 
-        // FIXME: BranchBoth is not necessarily correct here
-        return PutNodeInfo{accums[0].nodeId, accums[0].nodeHash, NodeType::BranchBoth};
+        return BuiltNode::existing(accums[0].nodeId, accums[0].nodeHash);
     }
 
 
@@ -1087,6 +1108,13 @@ class Quadrable {
 
     uint64_t getNextIntegerKey(lmdb::txn &txn, lmdb::dbi &dbi) {
         return getLargestIntegerKeyOrZero(txn, dbi) + 1;
+    }
+
+    uint64_t writeNodeToDb(lmdb::txn &txn, std::string_view nodeRaw) {
+        assert(nodeRaw.size() >= 40);
+        uint64_t newNodeId = getNextIntegerKey(txn, dbi_node);
+        dbi_node.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);
+        return newNodeId;
     }
 
 
