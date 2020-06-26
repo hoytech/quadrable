@@ -74,11 +74,11 @@ enum class EncodingType {
 static inline std::string encodeProof(Proof &p, EncodingType encodingType = EncodingType::CompactNoKeys) {
     std::string o;
 
-    // Proof encoding type
+    // Encoding type
 
     o += static_cast<unsigned char>(encodingType);
 
-    // Proof elements
+    // Elements
 
     for (auto &elem : p.elems) {
         o += static_cast<unsigned char>(elem.elemType);
@@ -102,7 +102,7 @@ static inline std::string encodeProof(Proof &p, EncodingType encodingType = Enco
 
     o += static_cast<unsigned char>(ProofElem::Type::Invalid); // end of elem list
 
-    // Proof cmds
+    // Cmds
 
     if (p.elems.size() == 0) return o;
 
@@ -116,7 +116,7 @@ static inline std::string encodeProof(Proof &p, EncodingType encodingType = Enco
         uint64_t bits = 0;
 
         for (size_t i = 0; i < hashQueue.size() ; i++) {
-            if (hashQueue[i].op == ProofCmd::Op::HashProvided) bits |= 1 << (7 - i);
+            if (hashQueue[i].op == ProofCmd::Op::HashProvided) bits |= 1 << (6 - i);
         }
 
         bits |= 1 << (6 - hashQueue.size());
@@ -131,12 +131,20 @@ static inline std::string encodeProof(Proof &p, EncodingType encodingType = Enco
     };
 
     for (auto &cmd : p.cmds) {
-        if (cmd.nodeOffset != currPos) {
+        while (cmd.nodeOffset != currPos) {
             flushHashQueue();
 
-            // jump
+            int64_t delta = static_cast<int64_t>(cmd.nodeOffset) - static_cast<int64_t>(currPos);
 
-            currPos = cmd.nodeOffset;
+            if (delta >= 1 && delta <= 32) {
+                o += static_cast<unsigned char>(0b1000'0000 | (delta - 1));
+                currPos = cmd.nodeOffset;
+            } else if (delta >= -32 && delta <= -1) {
+                o += static_cast<unsigned char>(0b1010'0000 | (std::abs(delta) - 1));
+                currPos = cmd.nodeOffset;
+            } else {
+                throw quaderr("not impl");
+            }
         }
 
         if (cmd.op == ProofCmd::Op::Merge) {
@@ -153,6 +161,120 @@ static inline std::string encodeProof(Proof &p, EncodingType encodingType = Enco
     flushHashQueue();
 
     return o;
+}
+
+
+static inline Proof decodeProof(std::string_view encoded) {
+    Proof proof;
+
+    auto getByte = [&](){
+        if (encoded.size() < 1) throw quaderr("proof ends prematurely");
+        auto res = static_cast<uint64_t>(encoded[0]);
+        encoded = encoded.substr(1);
+        return res;
+    };
+
+    auto getBytes = [&](size_t n){
+        if (encoded.size() < n) throw quaderr("proof ends prematurely");
+        auto res = encoded.substr(0, n);
+        encoded = encoded.substr(n);
+        return res;
+    };
+
+    auto getVarInt = [&](){
+        uint64_t res = 0;
+
+        while (1) {
+            uint64_t byte = getByte();
+            res = (res << 7) | (byte & 0b0111'1111);
+            if ((byte & 0b1000'0000) == 0) break;
+        }
+
+        return res;
+    };
+
+    // Encoding type
+
+    auto encodingType = static_cast<EncodingType>(getByte());
+
+    if (encodingType != EncodingType::CompactNoKeys && encodingType != EncodingType::CompactWithKeys) {
+        throw quaderr("unexpected proof encoding type: ", (int)encodingType);
+    }
+
+    // Elements
+
+    while (1) {
+        auto elemType = static_cast<ProofElem::Type>(getByte());
+
+        if (elemType == ProofElem::Type::Invalid) break;
+
+        if (elemType != ProofElem::Type::Leaf && elemType != ProofElem::Type::WitnessLeaf && elemType != ProofElem::Type::WitnessEmpty) {
+            throw quaderr("unexpected proof element type: ", (int)elemType);
+        }
+
+        ProofElem elem{elemType};
+
+        elem.depth = getByte();
+
+        if (encodingType == EncodingType::CompactNoKeys) {
+            elem.keyHash = std::string(getBytes(32));
+        } else if (encodingType == EncodingType::CompactWithKeys) {
+            auto keySize = getVarInt();
+            elem.key = std::string(getBytes(keySize));
+            elem.keyHash = Hash::hash(elem.key).str();
+        }
+
+        auto valSize = getVarInt();
+        elem.val = std::string(getBytes(valSize));
+
+        proof.elems.emplace_back(std::move(elem));
+    }
+
+    // Cmds
+
+    if (proof.elems.size() == 0) return proof;
+
+    uint64_t currPos = proof.elems.size() - 1; // starts at end
+
+    while (encoded.size()) {
+        auto byte = getByte();
+
+        if (byte == 0) {
+            proof.cmds.emplace_back(ProofCmd{ ProofCmd::Op::Merge, currPos, });
+        } else if ((byte & 0b1000'0000) == 0) {
+            while ((byte & 1) == 0) byte >>= 1;
+            byte >>= 1;
+
+            while (byte) {
+                if ((byte & 1)) {
+                    proof.cmds.emplace_back(ProofCmd{ ProofCmd::Op::HashProvided, currPos, std::string(getBytes(32)), });
+                } else {
+                    proof.cmds.emplace_back(ProofCmd{ ProofCmd::Op::HashEmpty, currPos, });
+                }
+
+                byte >>= 1;
+            }
+        } else {
+            auto action = byte >> 5;
+            auto distance = byte & 0b1'1111;
+
+            if (action == 0b100) { // short jump fwd
+                currPos += distance + 1;
+            } else if (action == 0b101) { // short jump rev
+                currPos -= distance + 1;
+            } else if (action == 0b110) { // long jump fwd
+                currPos += 1 << (distance + 6);
+            } else if (action == 0b111) { // long jump rev
+                currPos -= 1 << (distance + 6);
+            }
+
+            if (currPos > proof.elems.size()) { // rely on unsigned underflow to catch negative range
+                throw quaderr("jumped outside of proof elems");
+            }
+        }
+    }
+
+    return proof;
 }
 
 
