@@ -35,7 +35,7 @@ R"(
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [<from>]
       quadb [options] gc
-      quadb [options] makeProof [--format=(noKeys|withKeys)] [--hex] [--dump] [--] <keys>...
+      quadb [options] exportProof [--format=(noKeys|withKeys)] [--hex] [--dump] [--] <keys>...
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
       quadb [options] dump-tree
       quadb [options] mineHash <prefix>
@@ -262,7 +262,7 @@ void run(int argc, char **argv) {
         auto stats = gc.sweep(txn);
 
         std::cout << "Collected " << stats.collected << "/" << stats.total << " nodes" << std::endl;
-    } else if (args["makeProof"].asBool()) {
+    } else if (args["exportProof"].asBool()) {
         std::set<std::string> keys;
 
         for (auto &key : args["<keys>"].asStringList()) {
