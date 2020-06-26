@@ -192,6 +192,21 @@ FIXME
 
 ## Implementation
 
+
+### Hash-tree
+
+Why use trees to store data? The reason we use trees is because of the exponential growth in the number of nodes, as the depth is increased. The number of nodes that must be traversed to get to a leaf is related to the depth of the tree, which grows much slower than the number of nodes:
+
+![](docs/exponential.svg)
+
+In a merkle tree, each node has a `nodeHash` which is the formed by the concatenation of the `nodeHash`es of its children. In Quadrable the tree is binary, so there are always exactly two children (except for leaf nodes, which have none). The order of the hashes is important: The left child comes first, followed by the right child:
+
+![](docs/hash-tree.svg)
+
+The advantage of a merkle tree is that the `nodeHash` of the node at depth 0 (which has no parents) is a digest of all the other nodes and leaves. This top-level `nodeHash` is often just called the "root" of the tree. As long as the tree structure is carefully designed, and the hash function is secure, any changes to the tree or its contents will result in a new, distinct root.
+
+
+
 ### Keys
 
 For all operations, keys are first hashed and then these hashes are used to traverse the tree to find the locations where the values are stored:
@@ -205,22 +220,19 @@ Keys are hashed for multiple reasons:
 * It is computationally expensive to find multiple keys that have the same hash prefix, which an adversarial user might want to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See the FIXME section
 
 
-### Hash-tree
-
-Why use trees to store data? The reason we use trees is because of the exponential growth in the number of nodes, as the depth is increased. The number of nodes that must be traversed to get to a leaf is related to the depth of the tree, which grows much slower than the number of nodes:
-
-![](docs/exponential.svg)
-
-In a merkle tree, each node has a `nodeHash` which is the formed by the concatenation of the `nodeHash`es of its children. In Quadrable the tree is binary, so there are always exactly two children (except for leaf nodes, which have none). The order of the hashes is important: The left child (`0` direction) comes first, followed by the right child (`1` direction):
-
-![](docs/path.svg)
-
-The advantage of a merkle tree is that the `nodeHash` of the node at depth 0 (which has no parents) is a digest of all the other nodes and leaves. This top-level `nodeHash` is often just called the "root" of the tree. As long as the tree structure is carefully designed, and the hash function is secure, any changes to the tree or its contents will result in a new, distinct root.
-
 
 ### Sparseness
 
-Obviously creating a full tree with 2^256 possible key paths is impossible. In order to 
+Obviously creating a full tree with 2^256 possible key paths is impossible. Fortunately, there is [an optimization](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes.
+
+So by caching the value of the empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them during a computation is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied in many graph and tree algorithms.
+
+Quadrable makes two minor changes to this model of sparseness that help simplify the implementation:
+
+1. An empty leaf is given a `nodeHash` of 32 zero bytes. Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf or node that has an all zero hash.
+1. The hash function used for combining nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual. Again, it is computationally infeasible to find another input that has 32 zero bytes as an output.
+
+The consequences of these changes is that empty sub-trees at all depths have 32 zero bytes as their `nodeHash`. This includes the root node, so a totally empty tree will have a root of 32 zeros.
 
 
 
