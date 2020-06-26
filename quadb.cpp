@@ -23,9 +23,9 @@ static const char USAGE[] =
 R"(
     Usage:
       quadb [options] init
-      quadb [options] put <key> <val>
-      quadb [options] del <key>
-      quadb [options] get <key>
+      quadb [options] put [--] <key> <val>
+      quadb [options] del [--] <key>
+      quadb [options] get [--] <key>
       quadb [options] export [--sep=<sep>]
       quadb [options] import [--sep=<sep>]
       quadb [options] stats
@@ -35,7 +35,8 @@ R"(
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [<from>]
       quadb [options] gc
-      quadb [options] proof <key>
+      quadb [options] proof [--format=(noKeys|withKeys|dump)] [--hex] [--] <key>...
+      quadb [options] importProof [--hex]
       quadb [options] dump-tree
       quadb [options] mineHash <prefix>
 
@@ -262,8 +263,37 @@ void run(int argc, char **argv) {
 
         std::cout << "Collected " << stats.collected << "/" << stats.total << " nodes" << std::endl;
     } else if (args["proof"].asBool()) {
-        std::string k = args["<key>"].asString();
-        // FIXME
+        std::set<std::string> keys;
+
+        for (auto &key : args["<key>"].asStringList()) {
+            keys.insert(key);
+        }
+
+        auto proof = db.generateProof(txn, keys);
+
+        std::string format = "noKeys";
+        if (args["--format"]) format = args["--format"].asString();
+
+        if (format == "dump") {
+            quadrable::dumpProof(proof);
+        } else {
+            std::string encoded;
+
+            if (format == "noKeys") {
+                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::CompactNoKeys);
+            } else if (format == "withKeys") {
+                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::CompactWithKeys);
+            } else {
+                throw quaderr("unknown proof format");
+            }
+
+            if (args["--hex"].asBool()) {
+                std::cout << to_hex(encoded, true) << std::endl;
+            } else {
+                std::cout << encoded;
+            }
+        }
+    } else if (args["importProof"].asBool()) {
     } else if (args["mineHash"].asBool()) {
         std::random_device rd;
         std::mt19937 gen(rd());
