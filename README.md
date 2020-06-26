@@ -215,7 +215,7 @@ For all operations, keys are first hashed and then these hashes are used to trav
 
 Keys are hashed for multiple reasons:
 
-* It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since the merkle tree is sparse, as we will describe).
+* It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we collapse leaves, as described in FIXME).
 * Since the hash function used by Quadrable is believed to be cryptographically secure (meaning it acts like a [random oracle](https://eprint.iacr.org/2015/140.pdf)), the keys should be fairly evenly distributed which reduces the average depth of the tree.
 * It is computationally expensive to find multiple keys that have the same hash prefix, which an adversarial user might want to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See the FIXME section
 
@@ -225,12 +225,12 @@ Keys are hashed for multiple reasons:
 
 Obviously creating a full tree with 2^256 possible key paths is impossible. Fortunately, there is [an optimization](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes.
 
-So by caching the value of the empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them when needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied in many graph and tree algorithms.
+So by caching the value of the empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them when needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
 
 Quadrable makes two minor changes to this model of sparseness that help simplify the implementation:
 
 1. An empty leaf is given a `nodeHash` of 32 zero bytes. Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf or node that has an all zero hash.
-1. The hash function used for combining nodes (but not for hashing leaves) has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual. Again, it is computationally infeasible to find another input that has 32 zero bytes as an output.
+1. The hash function used when combining two children nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual. Again, it is computationally infeasible to find another input that has 32 zero bytes as an output.
 
 The consequences of these changes is that empty sub-trees at all depths have 32 zero bytes as their `nodeHash`. This includes the root node, so a totally empty tree will have a root of 32 zeros.
 
@@ -239,9 +239,27 @@ The consequences of these changes is that empty sub-trees at all depths have 32 
 * In some situations, like an Ethereum smart contract, using all zero values allows some minor optimizations (though it is possible to code without needing storage loads either way, by pre-computing and embedding the empty values in the contract code).
 
 
-### Leaf Encoding
+### Collapsed Leaves
 
-A potential issue with the scheme as described above is that a leaf could be
+Although using the sparseness optimisation described above makes it feasible to simulate a binary tree with a depth of 256, it still requires us to traverse 256 nodes to get to a leaf. And adding a new leaf requires creating 256 new nodes and 256 invocations of the hash function.
+
+In order to avoid this overhead, Quadrable uses another optimisation called *collapsed leaves*. In this case, whenever a sub-tree contains exactly one non-empty leaf node (implying all the other leaves are empty), this sub-tree is not stored or computed. Instead, only the leaf is stored. If the leaf is collapsed to depth N, then only N intermediate nodes need to be traversed to get to it from the root.
+
+The obvious issue with this approach is that we lose the ability to distinguish which of the many leaves in the sub-tree is the non-empty one. Even if we were to store the key hash alongside the leaf, a prover would not be able to trust this value if it was provided alongside a proof. The consequence is that a leaf could be "moved around" within a sub-tree, without affecting the root.
+
+In order to prevent this, we need to hash the path information along with the leaf's value when computing a collapsed leaf's `nodeHash`:
+
+    leafNodeHash = H(depth || H(key) || H(value))
+
+* The `depth` is a single byte that indicates at what level the node was collapsed.
+* The hashed key is 32 bytes and represents the path from the root to the leaf.
+* The hashed value is also 32 bytes, and represents the value stored in this leaf.
+
+There are two reasons for using the hash of the value rather than the value itself:
+
+* For non-inclusion proofs (see FIXME) it is sometimes necessary to send a leaf along with the proof to show that a different leaf lies along the path where the queried leaf exists. In this case, where the verifier doesn't care about the contents of this "witness leaf", we can just include the hash of the value in the proof, which could potentially be much smaller than the full value. Note that the verifier still has enough information to move this witness leaf in their partial tree, if they wish to set the non-inclusion proved value.
+* We can see that the input to the hash function when hashing a leaf is always 65 bytes. By contrast, the input to the hash function when combining nodes is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, or vice versa.
+
 
 
 
