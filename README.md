@@ -12,7 +12,7 @@ Although not required to use the library, it may help to understand the core dat
 
 * *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication. See my presentation on merkle trees for a detailed overview FIXME: link.
 * *Binary*: The style of merkle tree used by Quadrable combines together exactly two nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs, as described in FIXME.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leafs must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that hashes of the database keys can correspond directly to each leaf's location in the tree.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that hashes of the database keys can correspond directly to each leaf's location in the tree.
 
 Values are authenticated by generating and importing proofs:
 
@@ -225,14 +225,23 @@ Keys are hashed for multiple reasons:
 
 Obviously creating a full tree with 2^256 possible key paths is impossible. Fortunately, there is [an optimization](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes.
 
-So by caching the value of the empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them during a computation is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied in many graph and tree algorithms.
+So by caching the value of the empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them when needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied in many graph and tree algorithms.
 
 Quadrable makes two minor changes to this model of sparseness that help simplify the implementation:
 
 1. An empty leaf is given a `nodeHash` of 32 zero bytes. Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf or node that has an all zero hash.
-1. The hash function used for combining nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual. Again, it is computationally infeasible to find another input that has 32 zero bytes as an output.
+1. The hash function used for combining nodes (but not for hashing leaves) has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual. Again, it is computationally infeasible to find another input that has 32 zero bytes as an output.
 
 The consequences of these changes is that empty sub-trees at all depths have 32 zero bytes as their `nodeHash`. This includes the root node, so a totally empty tree will have a root of 32 zeros.
+
+* All zero roots are user-friendly: It's easy to recognize an empty tree.
+* A run of zeros will compress better (or are cheaper in gas, if zero bytes are discounted), so if empty tree roots are transmitted frequently as the base case in some protocol, it may help for them to be all zeros.
+* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimizations (though it is possible to code without needing storage loads either way, by pre-computing and embedding the empty values in the contract code).
+
+
+### Leaf Encoding
+
+A potential issue with the scheme as described above is that a leaf could be
 
 
 

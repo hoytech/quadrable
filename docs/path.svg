@@ -146,9 +146,9 @@
      borderopacity="1.0"
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
-     inkscape:zoom="0.98994949"
-     inkscape:cx="185.98181"
-     inkscape:cy="54.019789"
+     inkscape:zoom="1.4"
+     inkscape:cx="271.69609"
+     inkscape:cy="154.01979"
      inkscape:document-units="mm"
      inkscape:current-layer="layer1"
      showgrid="false"
@@ -397,5 +397,38 @@
          x="79.370438"
          y="90.914955"
          style="stroke-width:0.18548352">...</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-weight:normal;font-size:7.41934061px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.18548353"
+       x="38.730442"
+       y="90.573235"
+       id="text817-3-5"><tspan
+         sodipodi:role="line"
+         id="tspan815-6-4"
+         x="38.730442"
+         y="90.573235"
+         style="stroke-width:0.18548353">...</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-weight:normal;font-size:7.41934061px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.18548353"
+       x="101.32294"
+       y="70.463173"
+       id="text817-3-6"><tspan
+         sodipodi:role="line"
+         id="tspan815-6-6"
+         x="101.32294"
+         y="70.463173"
+         style="stroke-width:0.18548353">...</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-weight:normal;font-size:7.41934061px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.18548353"
+       x="36.415379"
+       y="51.593052"
+       id="text817-3-3"><tspan
+         sodipodi:role="line"
+         id="tspan815-6-9"
+         x="36.415379"
+         y="51.593052"
+         style="stroke-width:0.18548353">...</tspan></text>
   </g>
 </svg>
