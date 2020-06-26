@@ -1,6 +1,6 @@
 ![Quadrable Logo](docs/logo.svg)
 
-Quadrable is an authenticated multi-version embedded database. It is implemented as a sparse binary merkle tree and supports proof aggregation.
+Quadrable is an authenticated multi-version embedded database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs.
 
 ## Introduction
 
@@ -13,6 +13,11 @@ Although not required to use the library, it may help to understand the core dat
 * *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication. See my presentation on merkle trees for a detailed overview FIXME: link.
 * *Binary*: The style of merkle tree used by Quadrable combines together exactly two nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs, as described in FIXME.
 * *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leafs must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that hashes of the database keys can correspond directly to each leaf's location in the tree.
+
+Values are authenticated by generating and importing proofs:
+
+* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of hashes as a proof. The value is hashed and then combined with this list in order to reconstruct the hashes of the intermediate nodes. If at the end of the list you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have a lot of space overhead due to duplicated hashes. Also, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approx 0-4 bytes per proved item).
+* *Partial-trees*: Since the process of verifying a merkle proof reconstructs the intermediate nodes of the tree, Quadrable takes advantage of this by constructing a partial-tree when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access values not in the authenticated set. You can also make modifications on a partial-tree, as long as don't modify a value that you didn't authenticate. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. New compact proofs can be generated *from* a partial-tree, as long as the values are a subset of the original authenticated values.
 
 
 ## Building
