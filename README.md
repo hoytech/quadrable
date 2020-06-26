@@ -190,7 +190,7 @@ FIXME
 
 
 
-## Implementation
+## Tree Structure
 
 
 ### Hash-tree
@@ -216,8 +216,8 @@ For all operations, keys are first hashed and then these hashes are used to trav
 Keys are hashed for multiple reasons:
 
 * It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we collapse leaves, as described in FIXME).
-* Since the hash function used by Quadrable is believed to be cryptographically secure (meaning it acts like a [random oracle](https://eprint.iacr.org/2015/140.pdf)), the keys should be fairly evenly distributed which reduces the average depth of the tree.
-* It is computationally expensive to find multiple keys that have the same hash prefix, which an adversarial user might want to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See the FIXME section
+* Since the hash function used by Quadrable is believed to be cryptographically secure (meaning among other things that it acts like a [random oracle](https://eprint.iacr.org/2015/140.pdf)), the keys should be fairly evenly distributed which reduces the average depth of the tree.
+* It is computationally expensive to find two or more keys that have the same hash prefix, which an adversarial user might like to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See the FIXME section
 
 
 
@@ -262,9 +262,119 @@ There are two reasons for using the hash of the value rather than the value itse
 
 
 
+## Storage
+
+### LMDB
+
+Because traversing Quadrable's tree data-structure requires reading many small records, and these reads cannot be parallelized or pipelined, it is very important to be able to read records quickly and efficiently.
+
+Quadrable uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
+
+LMDB is a B-tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB that are commonly used for merkle tree storage. Compared to LevelDB, LMDB has radically better read performance and uses the CPU more efficiently. It has instant recovery after a crash, doesn't suffer from write amplification, offers ACID transactions and multi-process concurrency (in addition to multi-thread), and is less likely to suffer data corruption.
+
+### nodeId
+
+Some implementations of hash trees store leaves and nodes in a database, keyed by the node's hash. This has the nice property that records are automatically de-duplicated. Since a collision-resistant hash function is used, if two values have the same hash they can be assumed to be identical. This is called [content-addressable storage](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects).
+
+Quadrable does not do this. Instead, every time a node is added, a numeric incrementing `nodeId` is allocated and the node is stored with this key. Although records are not de-duplicated, there are several advantages to this scheme:
+
+* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as locality of reference (FIXME link). In particular, the top few levels of nodes in a tree are likely to reside in the same B-tree page.
+* When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree, since nodeIds are never reused.
+* Intermediate nodes don't store the hashes of their two children nodes, but instead just the nodeIds. This means they only occupy 8+8 bytes, rather than 32+32.
+
+## nodeType
+
+Internally there are several different types of nodes stored.
+
+* **Branches**: These are interior nodes that reference one or two children nodes. In the case where one of the nodes is an empty node, a branch left/right node is used. If the right child is empty, a branch left node is used, and vice versa. If neither are empty then a branch both node is used. Note that a branch implies that there are 2 or more leafs somewhere underneath this node, otherwise the branch node would be collapsed to a leaf or would be empty.
+* **Empty**: Empty nodes are not stored in the database, but instead are implicit children of branch left/right nodes.
+* **Leaf**: These are collapsed leaves, and contain enough information to satisfy get/put/del operations, and to be moved. A hash of the key is stored, but not the key itself. This is (optionally) stored in a separate table. See trackKeys FIXME
+* **Witness** and **WitnessLeaf**: These are nodes that exist in partial-trees. A Witness node could be standing in for either a branch or a leaf, but a WitnessLeaf could only be a Leaf. The only difference between a WitnessLeaf and a Leaf is that the WitnessLeaf only stores a hash of the value, not the value itself. This means that it cannot be used to satisfy a get request. However, it still could be used for non-inclusion purposes, or for updating/deletion.
+
+### Node layout in storage
+
+Nodes are stored as byte strings in the `quadrable_node` table in LMDB.
+
+The first 8 bytes are a combination of a tag value which indicates the nodeType, and an optional nodeId. These 8 bytes are a uint64_t stored in native byte order (which, yes, means that a Quadrable database file is *not* portable between machines of different endianness). The nodeId is shifted left 8 bits and a single byte tag is bitwise or'ed in.
+
+The following 32 bytes are a cache of the nodeHash of this node. In principle, this value could be reconstructed by recrawling the sub-tree beneath this node and rehashing the leaves and combining upwards, however this would ruin performance since the nodeHash is frequently needed, for example during tree updates and proof generation.
+
+The meaning of the remaining bytes depend on the nodeType:
+
+    branch left:  [8 bytes: \x01 | leftNodeId << 8]  [32 bytes: nodeHash]
+    branch right: [8 bytes: \x02 | rightNodeId << 8] [32 bytes: nodeHash]
+    branch both:  [8 bytes: \x03 | leftNodeId << 8]  [32 bytes: nodeHash] [8 bytes: right nodeId]
+    leaf:         [8 bytes: \x04 | 0]                [32 bytes: nodeHash[ [32 bytes: keyHash] [N bytes: val]
+ 
+    witness:      [8 bytes: \x05 | 0]                [32 bytes: nodeHash]
+    witnessLeaf:  [8 bytes: \x06 | 0]                [32 bytes: nodeHash] [32 bytes: keyHash] [32 bytes: valHash]
+
+
+
+
+## Proofs
+
+
 
 
 ## C++ Library
+
+### LMDB Environment
+
+Quadrable uses the [lmdbxx C++ bindings for LMDB](https://github.com/hoytech/lmdbxx) so consult its documentation as needed.
+
+All operations must be done inside of LMDB transactions. Some operations like `get` and `exportProof` can be done inside read-only transactions, whereas others require read-write transactions.
+
+Here is an example of how to setup the LMDB environment and create a Quadrable `db`:
+
+    lmdb::env lmdb_env = lmdb::env::create();
+    lmdb_env.set_max_dbs(64);
+    lmdb_env.set_mapsize(1UL * 1024UL * 1024UL * 1024UL * 1024UL);
+    lmdb_env.open("/path/to/quadrable-dir", MDB_CREATE, 0664);
+    lmdb_env.reader_check();
+
+    quadrable::Quadrable db;
+    db.trackKeys = true; // optional
+
+    {
+        auto txn = lmdb::txn::begin(lmdb_env, nullptr, 0);
+        db.init(txn);
+        txn.commit();
+    }
+
+* The mapsize should be a very large value. It will not actually use that much space initially, that is just the size of the virtual address space to allocate.
+* `reader_check()` will check for any stale readers (processes that had an LMDB environment open and then crashed without cleaning up). It is good practice to do this periodically, and/or on app startup.
+* Set `trackKeys` to `true` if you want to keep a record of the keys, so you can do things like `export` in the `quaddb` application. For some applications, enumerating keys is not necessary so it is disabled by default for efficiency reasons.
+* `db.init()` must be called in a write transaction, at least the first time the environment is accessed. This is so that it can setup the necessary LMDB tables.
+
+
+### Encoding
+
+Quadrable allows arbitrary byte strings as either keys or values. There are no restrictions on character encodings, or included 0 bytes.
+
+Keys and values can be arbitrarily long, with the one exception that the empty string is not allowed as a key.
+
+Although in the `quadb` application some values are presented in hexadecimal encoding, the Quadrature library itself does not handle hexadecimal at all. You may find it convenient to use the `to_hex` and `from_hex` utilities used by `quadb` and the test-suite:
+
+    #include "hoytech/hex.h"
+    using hoytech::to_hex;
+    using hoytech::from_hex;
+
+
+
+### Heads
+
+Many of the operations described in the `quadb` command-line application have counterparts in the C++ library.
+
+Note that the command-line application stores its currently checked out head information and other things in a special `quadrable_quadb_state` table, which allows them to persist in between command-line invocations. The C++ library does not use this table. Instead, this information is stored in the `Quadrable` object's memory. Your application and the command-line app can have different heads checked out simultaneously.
+
+* `db.isDetachedHead()`: Returns true if the current tree is detached, in other words there is no head checked out.
+* `db.getHead()`: Returns the current head checked out, or throws an exception if it's a detached head.
+* `db.root(txn)`: Returns the root of the current tree.
+* `db.checkout()`: Changes the current head to another (either existing, new, or detached).
+* `db.fork()`: Copies the current head to another (either overwriting, new, or detached).
+
+
 
 ### Operation Batching
 
@@ -312,6 +422,13 @@ Use the following to avoid unnecessary tree traversals:
 **Important**: In both of the above cases, the values are `string_view`s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort. If you need to keep them around longer, copy them into a string:
 
     std::string key1ValCopy(recs["key1"].val);
+
+### Garbage Collection
+
+The `GarbageCollector` class can be used to deallocate unneeded nodes. See the implementation in `quadb.cpp`.
+
+* `gc.markAllHeads()` will mark all the heads stored in the `quadrable_head` table. But if you have other roots stored you would like to preserve you can mark them with `gc.markTree()`. Both of these methods can be called inside a read-only transaction.
+* When you are done marking nodes, call `gc.sweep()`. This must be done inside a read-write transaction. All nodes that weren't found during the mark phase are deleted.
 
 
 
