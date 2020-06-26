@@ -7,6 +7,7 @@
 #include "hoytech/hex.h"
 
 using hoytech::to_hex;
+using hoytech::from_hex;
 
 
 

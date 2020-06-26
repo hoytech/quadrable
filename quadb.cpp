@@ -1,5 +1,5 @@
 #include <stdlib.h> // getenv
-#include <unistd.h> // access
+#include <unistd.h> // access, read
 #include <string.h> // strerror
 #include <errno.h> // strerror
 #include <sys/stat.h> // mkdir
@@ -35,8 +35,8 @@ R"(
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [<from>]
       quadb [options] gc
-      quadb [options] proof [--format=(noKeys|withKeys|dump)] [--hex] [--] <key>...
-      quadb [options] importProof [--hex]
+      quadb [options] makeProof [--format=(noKeys|withKeys)] [--hex] [--dump] [--] <keys>...
+      quadb [options] importProof [--root=<root>] [--hex] [--dump]
       quadb [options] dump-tree
       quadb [options] mineHash <prefix>
 
@@ -262,10 +262,10 @@ void run(int argc, char **argv) {
         auto stats = gc.sweep(txn);
 
         std::cout << "Collected " << stats.collected << "/" << stats.total << " nodes" << std::endl;
-    } else if (args["proof"].asBool()) {
+    } else if (args["makeProof"].asBool()) {
         std::set<std::string> keys;
 
-        for (auto &key : args["<key>"].asStringList()) {
+        for (auto &key : args["<keys>"].asStringList()) {
             keys.insert(key);
         }
 
@@ -274,7 +274,7 @@ void run(int argc, char **argv) {
         std::string format = "noKeys";
         if (args["--format"]) format = args["--format"].asString();
 
-        if (format == "dump") {
+        if (args["--dump"].asBool()) {
             quadrable::dumpProof(proof);
         } else {
             std::string encoded;
@@ -294,6 +294,37 @@ void run(int argc, char **argv) {
             }
         }
     } else if (args["importProof"].asBool()) {
+        std::string input;
+
+        {
+            char buf[4096];
+            while (1) {
+                ssize_t res = ::read(0, buf, sizeof(buf));
+                if (res == 0) break;
+                else if (res < 0 && errno == EINTR) continue;
+                else if (res < 0) throw quaderr("error reading from stdin: ", strerror(errno));
+                input += std::string(buf, static_cast<size_t>(res));
+            }
+        }
+
+        if (args["--hex"].asBool()) {
+            input.erase(std::remove_if(input.begin(), input.end(), ::isspace), input.end());
+            input = from_hex(input);
+        }
+
+        auto proof = quadrable::proofTransport::decodeProof(input);
+
+        if (args["--dump"].asBool()) {
+            quadrable::dumpProof(proof);
+        } else {
+            if (args["--root"]) {
+                std::string origRoot = from_hex(args["--root"].asString());
+                db.importProof(txn, proof, origRoot);
+            } else {
+                auto node = db.importProof(txn, proof);
+                std::cout << "Imported UNAUTHENTICATED proof. Root: " << to_hex(node.nodeHash.sv(), true) << std::endl;
+            }
+        }
     } else if (args["mineHash"].asBool()) {
         std::random_device rd;
         std::mt19937 gen(rd());

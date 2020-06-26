@@ -998,15 +998,17 @@ class Quadrable {
         bool merged = false;
     };
 
-    void importProof(lmdb::txn &txn, Proof &proof, std::string expectedRoot) {
-        auto rootNode = importProof(txn, proof);
+    BuiltNode importProof(lmdb::txn &txn, Proof &proof, std::string expectedRoot = "") {
+        auto rootNode = importProofInternal(txn, proof);
 
-        if (rootNode.nodeHash != expectedRoot) throw quaderr("proof invalid");
+        if (expectedRoot.size() && rootNode.nodeHash != expectedRoot) throw quaderr("proof invalid");
 
         setHeadNodeId(txn, rootNode.nodeId);
+
+        return rootNode;
     }
 
-    BuiltNode importProof(lmdb::txn &txn, Proof &proof) {
+    BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof) {
         if (getHeadNodeId(txn)) throw quaderr("can't importProof into existing head");
 
         std::vector<ImportProofItemAccum> accums;
