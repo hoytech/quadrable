@@ -180,24 +180,6 @@ struct Proof {
 
 
 
-
-
-
-
-
-
-
-// nodeId: incrementing uint64_t
-
-// node format:
-//   branch left:  <8 bytes: \x01 tag + left nodeId> <32 bytes: nodeHash>
-//   branch right: <8 bytes: \x02 tag + right nodeId> <32 bytes: nodeHash>
-//   branch both:  <8 bytes: \x03 tag + left nodeId> <32 bytes: nodeHash> <8 bytes: right nodeId>
-//   leaf:         <8 bytes: \x04 tag + 0> <32 bytes: nodeHash> <32 bytes: keyHash> <N bytes: val>
-//
-//   witness:      <8 bytes: \x05 tag + 0> <32 bytes: nodeHash>
-//   witnessLeaf:  <8 bytes: \x06 tag + 0> <32 bytes: nodeHash> <32 bytes: keyHash> <32 bytes: valHash>
-
 enum class NodeType {
     Empty = 0,
     BranchLeft = 1,
@@ -823,7 +805,7 @@ class Quadrable {
     using ProofHashes = std::map<Hash, std::string>; // keyHash -> key
     using ProofReverseNodeMap = std::map<uint64_t, uint64_t>; // child -> parent
 
-    Proof generateProof(lmdb::txn &txn, const std::set<std::string> &keys) {
+    Proof exportProof(lmdb::txn &txn, const std::set<std::string> &keys) {
         ProofHashes keyHashes;
 
         for (auto &key : keys) {
@@ -835,11 +817,11 @@ class Quadrable {
         ProofGenItems items;
         ProofReverseNodeMap reverseMap;
 
-        generateProofAux(txn, 0, headNodeId, 0, keyHashes.begin(), keyHashes.end(), items, reverseMap);
+        exportProofAux(txn, 0, headNodeId, 0, keyHashes.begin(), keyHashes.end(), items, reverseMap);
 
         Proof output;
 
-        output.cmds = generateProofCmds(txn, items, reverseMap, headNodeId);
+        output.cmds = exportProofCmds(txn, items, reverseMap, headNodeId);
 
         for (auto &item : items) {
             output.elems.emplace_back(std::move(item.elem));
@@ -848,7 +830,7 @@ class Quadrable {
         return output;
     }
 
-    void generateProofAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, ProofHashes::iterator begin, ProofHashes::iterator end, ProofGenItems &items, ProofReverseNodeMap &reverseMap) {
+    void exportProofAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, ProofHashes::iterator begin, ProofHashes::iterator end, ProofGenItems &items, ProofReverseNodeMap &reverseMap) {
         if (begin == end) {
             return;
         }
@@ -897,8 +879,8 @@ class Quadrable {
             // If one side is empty and the other side has elements to prove, don't go down the empty side.
             // This avoids unnecessary empty witnesses, since they will be satisfied with HashEmpty cmds from the other side.
 
-            if (node.leftNodeId || middle == end) generateProofAux(txn, depth+1, node.leftNodeId, nodeId, begin, middle, items, reverseMap);
-            if (node.rightNodeId || begin == middle) generateProofAux(txn, depth+1, node.rightNodeId, nodeId, middle, end, items, reverseMap);
+            if (node.leftNodeId || middle == end) exportProofAux(txn, depth+1, node.leftNodeId, nodeId, begin, middle, items, reverseMap);
+            if (node.rightNodeId || begin == middle) exportProofAux(txn, depth+1, node.rightNodeId, nodeId, middle, end, items, reverseMap);
         } else if (node.nodeType == NodeType::Witness) {
             throw quaderr("encountered witness node: incomplete tree");
         } else {
@@ -916,7 +898,7 @@ class Quadrable {
         std::vector <ProofCmd> proofCmds;
     };
 
-    std::vector<ProofCmd> generateProofCmds(lmdb::txn &txn, ProofGenItems &items, ProofReverseNodeMap &reverseMap, uint64_t headNodeId) {
+    std::vector<ProofCmd> exportProofCmds(lmdb::txn &txn, ProofGenItems &items, ProofReverseNodeMap &reverseMap, uint64_t headNodeId) {
         if (items.size() == 0) return {};
 
         std::vector<GenProofItemAccum> accums;

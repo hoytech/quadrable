@@ -269,7 +269,7 @@ void run(int argc, char **argv) {
             keys.insert(key);
         }
 
-        auto proof = db.generateProof(txn, keys);
+        auto proof = db.exportProof(txn, keys);
 
         std::string format = "noKeys";
         if (args["--format"]) format = args["--format"].asString();

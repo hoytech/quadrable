@@ -535,7 +535,7 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = proofRoundtrip(db.generateProof(txn, {
+        auto proof = proofRoundtrip(db.exportProof(txn, {
             "99",
             "68",
             "long",
@@ -571,7 +571,7 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = proofRoundtrip(db.generateProof(txn, {
+        auto proof = proofRoundtrip(db.exportProof(txn, {
             "582086612140", // 010
             "37481825503",  // 011
         }));
@@ -601,7 +601,7 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = proofRoundtrip(db.generateProof(txn, {
+        auto proof = proofRoundtrip(db.exportProof(txn, {
             "983467173326",
             "50728759955",
             "836336493412", // 00..
@@ -644,7 +644,7 @@ void doTests() {
             keys.insert(std::to_string(i));
         }
 
-        auto proof = proofRoundtrip(db.generateProof(txn, keys));
+        auto proof = proofRoundtrip(db.exportProof(txn, keys));
 
 
         db.checkout();
@@ -687,7 +687,7 @@ void doTests() {
                 keys.insert(std::to_string(i));
             }
 
-            proof = proofRoundtrip(db.generateProof(txn, keys));
+            proof = proofRoundtrip(db.exportProof(txn, keys));
         }
 
         db.checkout();
@@ -702,7 +702,7 @@ void doTests() {
                 keys.insert(std::to_string(i));
             }
 
-            proof2 = proofRoundtrip(db.generateProof(txn, keys));
+            proof2 = proofRoundtrip(db.exportProof(txn, keys));
         }
 
         db.checkout();
@@ -734,7 +734,7 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = proofRoundtrip(db.generateProof(txn, {
+        auto proof = proofRoundtrip(db.exportProof(txn, {
             "983467173326",
             "14864808866", // 00...
         }));
@@ -777,7 +777,7 @@ void doTests() {
         equivHeads("update leaf, fail trying to update witness", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "388662362962",
             }));
             origRoot = db.root(txn);
@@ -798,7 +798,7 @@ void doTests() {
         equivHeads("Update 2 leafs at different levels", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "947167210798",
                 "363565948405",
             }));
@@ -817,7 +817,7 @@ void doTests() {
         equivHeads("split leaf", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "947167210798",
             }));
             origRoot = db.root(txn);
@@ -835,7 +835,7 @@ void doTests() {
         equivHeads("no change to witness leaf", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "627438066816", // 00...
             }));
             origRoot = db.root(txn);
@@ -858,7 +858,7 @@ void doTests() {
         equivHeads("no change to witness leaf", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "627438066816", // 00...
             }));
             origRoot = db.root(txn);
@@ -882,7 +882,7 @@ void doTests() {
         equivHeads("update witness leaf", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "627438066816", // 00...
             }));
             origRoot = db.root(txn);
@@ -899,7 +899,7 @@ void doTests() {
         equivHeads("split witness leaf", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "627438066816", // 00...
             }));
             origRoot = db.root(txn);
@@ -918,7 +918,7 @@ void doTests() {
         equivHeads("can bubble up a witnessLeaf", [&]{
             db.change().put("a", "1").put("b", "2").apply(txn);
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "a", // 0...
                 "d", // 1...
             }));
@@ -937,7 +937,7 @@ void doTests() {
         equivHeads("can't bubble up a witness", [&]{
             db.change().put("a", "1").put("b", "2").apply(txn);
 
-            proof = proofRoundtrip(db.generateProof(txn, {
+            proof = proofRoundtrip(db.exportProof(txn, {
                 "a",
             }));
 
