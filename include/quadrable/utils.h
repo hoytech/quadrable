@@ -95,7 +95,7 @@ static inline void dumpStats(quadrable::Quadrable &db, lmdb::txn &txn) {
 
 
 
-static inline void dumpProof(Proof &p) {
+static inline void dumpProof(const Proof &p) {
     std::cout << "ITEMS (" << p.elems.size() << "):\n";
 
     for (size_t i=0; i<p.elems.size(); i++) {

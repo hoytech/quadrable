@@ -83,6 +83,10 @@ void doTests() {
         verify((root1 == root2) == expectEqual);
     };
 
+    auto proofRoundtrip = [](const Proof &p) {
+        return quadrable::proofTransport::decodeProof(quadrable::proofTransport::encodeProof(p));
+    };
+
     auto dump = [&]{ quadrable::dumpDb(db, txn); };
     auto stats = [&]{ quadrable::dumpStats(db, txn); };
     auto stop = [&]{ throw quaderr("STOP"); };
@@ -526,15 +530,17 @@ void doTests() {
             std::string s = std::to_string(i);
             changes.put(s, s + "val");
         }
+        changes.put("long", std::string(789, 'A')); // test varints
         changes.apply(txn);
 
         auto origRoot = db.root(txn);
 
-        auto proof = db.generateProof(txn, {
+        auto proof = proofRoundtrip(db.generateProof(txn, {
             "99",
             "68",
+            "long",
             "asdf",
-        });
+        }));
 
         db.checkout();
 
@@ -547,6 +553,9 @@ void doTests() {
 
         verify(db.get(txn, "68", val));
         verify(val == "68val");
+
+        verify(db.get(txn, "long", val));
+        verify(val == std::string(789, 'A'));
 
         verify(!db.get(txn, "asdf", val));
 
@@ -562,10 +571,10 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = db.generateProof(txn, {
+        auto proof = proofRoundtrip(db.generateProof(txn, {
             "582086612140", // 010
             "37481825503",  // 011
-        });
+        }));
 
         db.checkout();
 
@@ -592,13 +601,13 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = db.generateProof(txn, {
+        auto proof = proofRoundtrip(db.generateProof(txn, {
             "983467173326",
             "50728759955",
             "836336493412", // 00..
             "826547358742", // 001..
             "231172376960", // 001..
-        });
+        }));
 
 
         db.checkout();
@@ -635,7 +644,7 @@ void doTests() {
             keys.insert(std::to_string(i));
         }
 
-        auto proof = db.generateProof(txn, keys);
+        auto proof = proofRoundtrip(db.generateProof(txn, keys));
 
 
         db.checkout();
@@ -678,7 +687,7 @@ void doTests() {
                 keys.insert(std::to_string(i));
             }
 
-            proof = db.generateProof(txn, keys);
+            proof = proofRoundtrip(db.generateProof(txn, keys));
         }
 
         db.checkout();
@@ -693,7 +702,7 @@ void doTests() {
                 keys.insert(std::to_string(i));
             }
 
-            proof2 = db.generateProof(txn, keys);
+            proof2 = proofRoundtrip(db.generateProof(txn, keys));
         }
 
         db.checkout();
@@ -725,10 +734,10 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = db.generateProof(txn, {
+        auto proof = proofRoundtrip(db.generateProof(txn, {
             "983467173326",
             "14864808866", // 00...
-        });
+        }));
 
         verify(proof.elems.size() == 1); // No separate WitnessEmpty is needed because a HashEmpty cmd is on existing node's path
 
@@ -768,9 +777,9 @@ void doTests() {
         equivHeads("update leaf, fail trying to update witness", [&]{
             setupDb();
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "388662362962",
-            });
+            }));
             origRoot = db.root(txn);
 
             db.change().put("388662362962", "A2").apply(txn);
@@ -789,10 +798,10 @@ void doTests() {
         equivHeads("Update 2 leafs at different levels", [&]{
             setupDb();
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "947167210798",
                 "363565948405",
-            });
+            }));
             origRoot = db.root(txn);
 
             db.change().put("947167210798", "B2").apply(txn);
@@ -808,9 +817,9 @@ void doTests() {
         equivHeads("split leaf", [&]{
             setupDb();
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "947167210798",
-            });
+            }));
             origRoot = db.root(txn);
 
             db.change().put("762909246408", "E").apply(txn); // 1000...
@@ -826,9 +835,9 @@ void doTests() {
         equivHeads("no change to witness leaf", [&]{
             setupDb();
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "627438066816", // 00...
-            });
+            }));
             origRoot = db.root(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
@@ -849,9 +858,9 @@ void doTests() {
         equivHeads("no change to witness leaf", [&]{
             setupDb();
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "627438066816", // 00...
-            });
+            }));
             origRoot = db.root(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
@@ -873,9 +882,9 @@ void doTests() {
         equivHeads("update witness leaf", [&]{
             setupDb();
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "627438066816", // 00...
-            });
+            }));
             origRoot = db.root(txn);
 
             db.change().put("388662362962", "A2").apply(txn);
@@ -890,9 +899,9 @@ void doTests() {
         equivHeads("split witness leaf", [&]{
             setupDb();
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "627438066816", // 00...
-            });
+            }));
             origRoot = db.root(txn);
 
             db.change().put("627438066816", "NEW").apply(txn);
@@ -909,10 +918,10 @@ void doTests() {
         equivHeads("can bubble up a witnessLeaf", [&]{
             db.change().put("a", "1").put("b", "2").apply(txn);
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "a", // 0...
                 "d", // 1...
-            });
+            }));
             origRoot = db.root(txn);
 
             db.change().del("a").apply(txn);
@@ -928,9 +937,9 @@ void doTests() {
         equivHeads("can't bubble up a witness", [&]{
             db.change().put("a", "1").put("b", "2").apply(txn);
 
-            proof = db.generateProof(txn, {
+            proof = proofRoundtrip(db.generateProof(txn, {
                 "a",
-            });
+            }));
 
             origRoot = db.root(txn);
         }, [&]{
@@ -942,27 +951,6 @@ void doTests() {
         });
 
 
-    });
-
-
-
-
-    test("proof encoding", [&]{
-        auto changes = db.change();
-        changes.put("a", std::string(200, 'A'));
-        changes.apply(txn);
-
-        auto origRoot = db.root(txn);
-
-        auto proof = db.generateProof(txn, {
-            "a",
-        });
-        dumpProof(proof);
-
-        auto encodedProof = quadrable::proofTransport::encodeProof(proof);
-        std::cout << "BING: " << to_hex(encodedProof) << std::endl;
-
-        db.checkout();
     });
 
 
