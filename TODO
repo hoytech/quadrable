@@ -5,9 +5,7 @@ lib
   ? try putting leaves in their own node key-space to improve locality of interior nodes
   ? maybe way to avoid needing to store stuff in lmdb to validate a proof?
   ? ability to set resource limits on proof sizes when verifying (setMaxProofCmds?)
-
-quadb tool
-  - proofs
+  ? ability to discard intermediate nodes to save disk-space, since they can be re-computed
 
 solidity impl
 

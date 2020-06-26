@@ -1,6 +1,6 @@
 ![Quadrable Logo](docs/logo.svg)
 
-Quadrable is an authenticated multi-version embedded database. It is implemented as a sparse binary merkle tree.
+Quadrable is an authenticated multi-version embedded database. It is implemented as a sparse binary merkle tree and supports proof aggregation.
 
 ## Introduction
 
@@ -28,7 +28,7 @@ The LMDB library and header files are required. On Ubuntu/Debian run this:
 Clone the repo, `cd` into it, and run these commands:
 
     git submodule update --init
-    make
+    make -j
 
 
 
@@ -107,9 +107,9 @@ This is an important property of Quadrable: Identical trees have identical roots
 
 ### quadb import
 
-If you wish to insert multiple records into the DB, running `quadb put` multiple times is inefficient. This is because each time it is run it will need to discard and create new intermediate nodes.
+If you wish to insert multiple records into the DB, running `quadb put` multiple times is inefficient. This is because each time it is run it will need to create new intermediate nodes and discard the previously created ones.
 
-A better way to do it is to use `quadb import` which can put multiple records with a single traversal of the tree. This command reads comma-separated `key,value` pairs standard input, one per line. The separator can be changed with the `--sep` option. On success there is no output:
+A better way to do it is to use `quadb import` which can put multiple records with a single traversal of the tree. This command reads comma-separated `key,value` pairs from standard input, one per line. The separator can be changed with the `--sep` option. On success there is no output:
 
     $ perl -E 'for $i (1..1000) { say "key $i,value $i" }' | quadb import
 
