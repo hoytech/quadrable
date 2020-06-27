@@ -32,7 +32,7 @@ R"(
       quadb [options] status
       quadb [options] diff <head> [--sep=<sep>]
       quadb [options] head
-      quadb [options] head rm <head>
+      quadb [options] head rm [<head>]
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [<from>]
       quadb [options] gc
@@ -173,7 +173,15 @@ void run(int argc, char **argv) {
         if (!isDetachedHead) currHead = db.getHead();
 
         if (args["rm"].asBool()) {
-            db.dbi_head.del(txn, args["<head>"].asString());
+            if (args["<head>"]) {
+                db.dbi_head.del(txn, args["<head>"].asString());
+            } else {
+                if (isDetachedHead) {
+                    db.checkout();
+                } else {
+                    db.dbi_head.del(txn, currHead);
+                }
+            }
         } else {
             struct HeadElem {
                 std::string head;
@@ -192,12 +200,19 @@ void run(int argc, char **argv) {
                 return a.nodeId > b.nodeId;
             });
 
+            if (isDetachedHead) {
+                uint64_t nodeId = db.getHeadNodeId(txn);
+                std::cout << "D> [detached] : " << quadrable::renderNode(db, txn, nodeId) << "\n";
+            }
+
             for (auto &e : headElems) {
                 if (!isDetachedHead && currHead == e.head) std::cout << "=> ";
                 else std::cout << "   ";
 
-                std::cout << e.head << " : " << quadrable::renderNode(db, txn, e.nodeId) << std::endl;
+                std::cout << e.head << " : " << quadrable::renderNode(db, txn, e.nodeId) << "\n";
             }
+
+            std::cout << std::flush;
         }
     } else if (args["export"].asBool()) {
         std::string sep = ",";
