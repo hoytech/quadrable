@@ -328,6 +328,15 @@ class Quadrable {
         return nodeId;
     }
 
+    uint64_t getHeadNodeId(lmdb::txn &txn, std::string_view otherHead) {
+        uint64_t nodeId = 0;
+
+        std::string_view headRaw;
+        if (dbi_head.get(txn, otherHead, headRaw)) nodeId = lmdb::from_sv<uint64_t>(headRaw);
+
+        return nodeId;
+    }
+
     void setHeadNodeId(lmdb::txn &txn, uint64_t nodeId) {
         if (detachedHead) {
             detachedHeadNodeId = nodeId;
@@ -633,7 +642,7 @@ class Quadrable {
                 }
 
                 if (node.nodeType == NodeType::Leaf && begin->second.val == node.leafVal()) {
-                    // No change to this leaf, so do nothing. Don't do this for WitnessLeaf nodes, since we need to upgrade them to Leafs.
+                    // No change to this leaf, so do nothing. Don't do this for WitnessLeaf nodes, since we need to upgrade them to leaves.
                     return BuiltNode::reuse(node);
                 }
 
@@ -1066,6 +1075,34 @@ class Quadrable {
 
 
 
+
+
+    void walkTree(lmdb::txn &txn, std::function<bool(ParsedNode &, uint64_t)> cb) {
+        auto nodeId = getHeadNodeId(txn);
+        walkTreeAux(txn, cb, nodeId, 0);
+    }
+
+    void walkTree(lmdb::txn &txn, uint64_t nodeId, std::function<bool(ParsedNode &, uint64_t)> cb) {
+        walkTreeAux(txn, cb, nodeId, 0);
+    }
+
+    void walkTreeAux(lmdb::txn &txn, std::function<bool(ParsedNode &, uint64_t)> cb, uint64_t nodeId, uint64_t depth) {
+        ParsedNode node(txn, dbi_node, nodeId);
+
+        if (node.nodeType == NodeType::Empty) return;
+
+        if (!cb(node, depth)) return;
+
+        if (node.isBranch()) {
+            checkDepth(depth);
+
+            walkTreeAux(txn, cb, node.leftNodeId, depth+1);
+            walkTreeAux(txn, cb, node.rightNodeId, depth+1);
+        }
+    }
+
+
+
     class GarbageCollector {
       friend class Quadrable;
 
@@ -1153,27 +1190,102 @@ class Quadrable {
         return output;
     }
 
-    void walkTree(lmdb::txn &txn, std::function<bool(ParsedNode &, uint64_t)> cb) {
-        auto nodeId = getHeadNodeId(txn);
-        walkTreeAux(txn, cb, nodeId, 0);
+
+
+
+    struct Diff {
+        std::string keyHash;
+        std::string key;
+        std::string val; // new value if insertion, old value if deletion
+        bool deletion = false;
+    };
+
+    void diffPush(lmdb::txn &txn, ParsedNode &node, std::vector<Diff> &output, bool deletion) {
+        std::string_view key;
+        getLeafKey(txn, node.nodeId, key);
+
+        output.emplace_back(Diff{
+            std::string(node.leafKeyHash()),
+            std::string(key),
+            std::string(node.leafVal()),
+            deletion,
+        });
     }
 
-    void walkTree(lmdb::txn &txn, uint64_t nodeId, std::function<bool(ParsedNode &, uint64_t)> cb) {
-        walkTreeAux(txn, cb, nodeId, 0);
+    void diffPushAdd(lmdb::txn &txn, ParsedNode &node, std::vector<Diff> &output) {
+        diffPush(txn, node, output, false);
     }
 
-    void walkTreeAux(lmdb::txn &txn, std::function<bool(ParsedNode &, uint64_t)> cb, uint64_t nodeId, uint64_t depth) {
-        ParsedNode node(txn, dbi_node, nodeId);
+    void diffPushDel(lmdb::txn &txn, ParsedNode &node, std::vector<Diff> &output) {
+        diffPush(txn, node, output, true);
+    }
 
-        if (node.nodeType == NodeType::Empty) return;
+    void diffWalk(lmdb::txn &txn, uint64_t nodeId, std::function<void(ParsedNode &)> cb) {
+        walkTree(txn, nodeId, [&](ParsedNode &node, uint64_t depth){
+            if (node.isWitness()) throw quaderr("encountered witness during diffWalk");
+            if (node.isLeaf()) cb(node);
+            return true;
+        });
+    }
 
-        if (!cb(node, depth)) return;
+    std::vector<Diff> diff(lmdb::txn &txn, uint64_t nodeIdA, uint64_t nodeIdB) {
+        std::vector<Diff> output;
 
-        if (node.isBranch()) {
-            checkDepth(depth);
+        diffAux(txn, nodeIdA, nodeIdB, output);
 
-            walkTreeAux(txn, cb, node.leftNodeId, depth+1);
-            walkTreeAux(txn, cb, node.rightNodeId, depth+1);
+        return output;
+    }
+
+    void diffAux(lmdb::txn &txn, uint64_t nodeIdA, uint64_t nodeIdB, std::vector<Diff> &output) {
+        if (nodeIdA == nodeIdB) return;
+
+        ParsedNode nodeA(txn, dbi_node, nodeIdA);
+        ParsedNode nodeB(txn, dbi_node, nodeIdB);
+
+        if (nodeA.isWitness() || nodeB.isWitness()) throw quaderr("encountered witness during diff");
+
+        if (nodeA.isBranch() && nodeB.isBranch()) {
+            diffAux(txn, nodeA.leftNodeId, nodeB.leftNodeId, output);
+            diffAux(txn, nodeA.rightNodeId, nodeB.rightNodeId, output);
+        } else if (!nodeA.isBranch() && nodeB.isBranch()) {
+            // All keys in B were added (except maybe if A is a leaf)
+            bool processed = false;
+            diffWalk(txn, nodeIdB, [&](ParsedNode &node){
+                if (nodeA.isLeaf() && node.leafKeyHash() == nodeA.leafKeyHash()) {
+                    processed = true;
+                    if (node.leafVal() != nodeA.leafVal()) {
+                        diffPushDel(txn, nodeA, output);
+                        diffPushAdd(txn, node, output);
+                    }
+                } else {
+                    diffPushAdd(txn, node, output);
+                }
+            });
+            if (nodeA.isLeaf() && !processed) diffPushDel(txn, nodeA, output);
+        } else if (nodeA.isBranch() && !nodeB.isBranch()) {
+            // All keys in A were deleted (except maybe if B is a leaf)
+            bool processed = false;
+            diffWalk(txn, nodeIdA, [&](ParsedNode &node){
+                if (nodeB.isLeaf() && node.leafKeyHash() == nodeB.leafKeyHash()) {
+                    processed = true;
+                    if (node.leafVal() != nodeB.leafVal()) {
+                        diffPushDel(txn, nodeB, output);
+                        diffPushAdd(txn, node, output);
+                    }
+                } else {
+                    diffPushDel(txn, node, output);
+                }
+            });
+            if (nodeB.isLeaf() && !processed) diffPushAdd(txn, nodeB, output);
+        } else if (nodeA.isLeaf() && nodeB.isLeaf()) {
+            if (nodeA.leafKeyHash() != nodeB.leafKeyHash() || nodeA.leafVal() != nodeB.leafVal()) {
+                diffPushDel(txn, nodeA, output);
+                diffPushAdd(txn, nodeB, output);
+            }
+        } else if (nodeA.isLeaf()) {
+            diffPushDel(txn, nodeA, output);
+        } else if (nodeB.isLeaf()) {
+            diffPushAdd(txn, nodeB, output);
         }
     }
 

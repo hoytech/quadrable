@@ -30,6 +30,7 @@ R"(
       quadb [options] import [--sep=<sep>]
       quadb [options] stats
       quadb [options] status
+      quadb [options] diff <head> [--sep=<sep>]
       quadb [options] head
       quadb [options] head rm <head>
       quadb [options] checkout [<head>]
@@ -252,6 +253,24 @@ void run(int argc, char **argv) {
 
         uint64_t nodeId = db.getHeadNodeId(txn);
         std::cout << "Root: " << quadrable::renderNode(db, txn, nodeId) << std::endl;
+    } else if (args["diff"].asBool()) {
+        std::string sep = ",";
+        if (args["--sep"]) sep = args["--sep"].asString();
+
+        uint64_t currNodeId = db.getHeadNodeId(txn);
+        uint64_t otherNodeId = db.getHeadNodeId(txn, args["<head>"].asString());
+
+        auto deltas = db.diff(txn, otherNodeId, currNodeId);
+
+        for (auto &delta : deltas) {
+            if (delta.deletion) std::cout << "-";
+            else std::cout << "+";
+
+            std::cout << delta.key.size() ? delta.key : quadrable::renderUnknown(delta.keyHash);
+            std::cout << sep << delta.val << "\n";
+        }
+
+        std::cout << std::flush;
     } else if (args["gc"].asBool()) {
         quadrable::Quadrable::GarbageCollector gc(db);
 
