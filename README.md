@@ -178,11 +178,19 @@ Although semantically `quadb fork` acts like it copies the tree pointed to by th
 
 `quadb fork` can take a second argument which represents the head to be copied from, instead of using the current head. Or it can take no arguments, in which case the current head is forked to a detached head (see FIXME).
 
+### quadb diff
+
+FIXME
+
 ### quadb exportProof
 
 FIXME
 
 ### quadb importProof
+
+FIXME
+
+### quadb mergeProof
 
 FIXME
 
@@ -274,7 +282,7 @@ There are two reasons for using the hash of the value rather than the value itse
 * It ensures the input when hashing a leaf is always 65 bytes. By contrast, the input when hashing two nodeHashes to get the parent's nodeHash is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, and vice versa.
 
 
-### Spliting Leaves
+### Splitting Leaves
 
 Since a collapsed leaf is occupying a spot high up in the tree that could potentially be in the way of new leaves with the same key prefix, during an insertion it is sometimes necessary to "split" a collapsed leaf. A new branch node will be added in place of the collapsed leaf, and both leaves will be inserted further down underneath this branch. 
 
