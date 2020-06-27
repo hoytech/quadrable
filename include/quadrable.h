@@ -487,13 +487,13 @@ class Quadrable {
             return output;
         }
 
-        static BuiltNode newBranch(Quadrable *db, lmdb::txn &txn, uint64_t leftNodeId, uint64_t rightNodeId, Hash &leftHash, Hash &rightHash) {
+        static BuiltNode newBranch(Quadrable *db, lmdb::txn &txn, const BuiltNode &leftNode, const BuiltNode &rightNode) {
             BuiltNode output;
 
             {
                 Keccak k;
-                k.add(leftHash.data, sizeof(leftHash.data));
-                k.add(rightHash.data, sizeof(rightHash.data));
+                k.add(leftNode.nodeHash.data, sizeof(leftNode.nodeHash.data));
+                k.add(rightNode.nodeHash.data, sizeof(rightNode.nodeHash.data));
                 k.getHash(output.nodeHash.data);
             }
 
@@ -501,22 +501,22 @@ class Quadrable {
 
             uint64_t w1;
 
-            if (rightNodeId == 0) {
+            if (rightNode.nodeId == 0) {
                 output.nodeType = NodeType::BranchLeft;
-                w1 = uint64_t(NodeType::BranchLeft) | leftNodeId << 8;
-            } else if (leftNodeId == 0) {
+                w1 = uint64_t(NodeType::BranchLeft) | leftNode.nodeId << 8;
+            } else if (leftNode.nodeId == 0) {
                 output.nodeType = NodeType::BranchRight;
-                w1 = uint64_t(NodeType::BranchRight) | rightNodeId << 8;
+                w1 = uint64_t(NodeType::BranchRight) | rightNode.nodeId << 8;
             } else {
                 output.nodeType = NodeType::BranchBoth;
-                w1 = uint64_t(NodeType::BranchBoth) | leftNodeId << 8;
+                w1 = uint64_t(NodeType::BranchBoth) | leftNode.nodeId << 8;
             }
 
             nodeRaw += lmdb::to_sv<uint64_t>(w1);
             nodeRaw += output.nodeHash.sv();
 
-            if (rightNodeId && leftNodeId) {
-                nodeRaw += lmdb::to_sv<uint64_t>(rightNodeId);
+            if (rightNode.nodeId && leftNode.nodeId) {
+                nodeRaw += lmdb::to_sv<uint64_t>(rightNode.nodeId);
             }
 
             output.nodeId = db->writeNodeToDb(txn, nodeRaw);
@@ -716,7 +716,7 @@ class Quadrable {
             // One of the nodes is a branch, or both are leaves, so bubbling can stop
         }
 
-        return BuiltNode::newBranch(this, txn, leftNode.nodeId, rightNode.nodeId, leftNode.nodeHash, rightNode.nodeHash);
+        return BuiltNode::newBranch(this, txn, leftNode, rightNode);
     }
 
 
@@ -990,6 +990,8 @@ class Quadrable {
     };
 
     BuiltNode importProof(lmdb::txn &txn, Proof &proof, std::string expectedRoot = "") {
+        if (getHeadNodeId(txn)) throw quaderr("can't importProof into non-empty head");
+
         auto rootNode = importProofInternal(txn, proof);
 
         if (expectedRoot.size() && rootNode.nodeHash != expectedRoot) throw quaderr("proof invalid");
@@ -999,9 +1001,19 @@ class Quadrable {
         return rootNode;
     }
 
-    BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof) {
-        if (getHeadNodeId(txn)) throw quaderr("can't importProof into existing head");
+    BuiltNode mergeProof(lmdb::txn &txn, Proof &proof) {
+        auto rootNode = importProofInternal(txn, proof);
 
+        if (rootNode.nodeHash != root(txn)) throw quaderr("different roots, unable to merge proofs");
+
+        auto updatedRoot = mergeProofInternal(txn, getHeadNodeId(txn), rootNode.nodeId);
+
+        setHeadNodeId(txn, updatedRoot.nodeId);
+
+        return rootNode;
+    }
+
+    BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof) {
         std::vector<ImportProofItemAccum> accums;
 
         for (size_t i = 0; i < proof.elems.size(); i++) {
@@ -1055,9 +1067,9 @@ class Quadrable {
             BuiltNode branchInfo;
 
             if (cmd.op == ProofCmd::Op::Merge || !accum.keyHash.getBit(accum.depth - 1)) {
-                branchInfo = BuiltNode::newBranch(this, txn, accum.nodeId, siblingInfo.nodeId, accum.nodeHash, siblingInfo.nodeHash);
+                branchInfo = BuiltNode::newBranch(this, txn, BuiltNode::existing(accum.nodeId, accum.nodeHash), BuiltNode::existing(siblingInfo.nodeId, siblingInfo.nodeHash));
             } else {
-                branchInfo = BuiltNode::newBranch(this, txn, siblingInfo.nodeId, accum.nodeId, siblingInfo.nodeHash, accum.nodeHash);
+                branchInfo = BuiltNode::newBranch(this, txn, BuiltNode::existing(siblingInfo.nodeId, siblingInfo.nodeHash), BuiltNode::existing(accum.nodeId, accum.nodeHash));
             }
 
             accum.depth--;
@@ -1069,6 +1081,31 @@ class Quadrable {
         if (accums[0].depth != 0) throw quaderr("proof didn't reach root");
 
         return BuiltNode::existing(accums[0].nodeId, accums[0].nodeHash);
+    }
+
+    BuiltNode mergeProofInternal(lmdb::txn &txn, uint64_t origNodeId, uint64_t newNodeId) {
+        ParsedNode origNode(txn, dbi_node, origNodeId);
+        ParsedNode newNode(txn, dbi_node, newNodeId);
+
+        if ((origNode.isWitness() && !newNode.isWitness()) ||
+            (origNode.nodeType == NodeType::Witness && newNode.nodeType == NodeType::WitnessLeaf)) {
+
+            // FIXME: if keys are available on one of them
+            return BuiltNode::reuse(newNode);
+        } else if (origNode.isBranch() && newNode.isBranch()) {
+            auto newLeftNode = mergeProofInternal(txn, origNode.leftNodeId, newNode.leftNodeId);
+            auto newRightNode = mergeProofInternal(txn, origNode.rightNodeId, newNode.rightNodeId);
+
+            if (origNode.leftNodeId == newLeftNode.nodeId && origNode.rightNodeId == newRightNode.nodeId) {
+                return BuiltNode::reuse(origNode);
+            } else if (newNode.leftNodeId == newLeftNode.nodeId && newNode.rightNodeId == newRightNode.nodeId) {
+                return BuiltNode::reuse(newNode);
+            } else {
+                return BuiltNode::newBranch(this, txn, newLeftNode, newRightNode);
+            }
+        } else {
+            return BuiltNode::reuse(origNode);
+        }
     }
 
 

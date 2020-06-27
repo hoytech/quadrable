@@ -3,6 +3,8 @@ lib
     - WitnessBranch
   - import proof to existing tree, as long as root matches
     ? merge trees
+  - warn when exporting partial tree
+  - tests for diff and mergeProof
   ? ability to compact tree to ensure node Ids are sequential
   ? try putting leaves in their own node key-space to improve locality of interior nodes
   ? maybe way to avoid needing to store stuff in lmdb to validate a proof?

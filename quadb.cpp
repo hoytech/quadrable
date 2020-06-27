@@ -38,6 +38,7 @@ R"(
       quadb [options] gc
       quadb [options] exportProof [--format=(noKeys|withKeys)] [--hex] [--dump] [--] <keys>...
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
+      quadb [options] mergeProof [--hex]
       quadb [options] dump-tree
       quadb [options] mineHash <prefix>
 
@@ -49,6 +50,23 @@ R"(
 )";
 
 
+
+
+
+static std::string slurpStdin() {
+    std::string output;
+    char buf[4096];
+
+    while (1) {
+        ssize_t res = ::read(0, buf, sizeof(buf));
+        if (res == 0) break;
+        else if (res < 0 && errno == EINTR) continue;
+        else if (res < 0) throw quaderr("error reading from stdin: ", strerror(errno));
+        output += std::string(buf, static_cast<size_t>(res));
+    }
+
+    return output;
+}
 
 
 void run(int argc, char **argv) {
@@ -313,18 +331,7 @@ void run(int argc, char **argv) {
             }
         }
     } else if (args["importProof"].asBool()) {
-        std::string input;
-
-        {
-            char buf[4096];
-            while (1) {
-                ssize_t res = ::read(0, buf, sizeof(buf));
-                if (res == 0) break;
-                else if (res < 0 && errno == EINTR) continue;
-                else if (res < 0) throw quaderr("error reading from stdin: ", strerror(errno));
-                input += std::string(buf, static_cast<size_t>(res));
-            }
-        }
+        std::string input = slurpStdin();
 
         if (args["--hex"].asBool()) {
             input.erase(std::remove_if(input.begin(), input.end(), ::isspace), input.end());
@@ -344,6 +351,17 @@ void run(int argc, char **argv) {
                 std::cout << "Imported UNAUTHENTICATED proof. Root: " << to_hex(node.nodeHash.sv(), true) << std::endl;
             }
         }
+    } else if (args["mergeProof"].asBool()) {
+        std::string input = slurpStdin();
+
+        if (args["--hex"].asBool()) {
+            input.erase(std::remove_if(input.begin(), input.end(), ::isspace), input.end());
+            input = from_hex(input);
+        }
+
+        auto proof = quadrable::proofTransport::decodeProof(input);
+
+        db.mergeProof(txn, proof);
     } else if (args["mineHash"].asBool()) {
         std::random_device rd;
         std::mt19937 gen(rd());
