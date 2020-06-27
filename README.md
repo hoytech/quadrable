@@ -282,6 +282,16 @@ Quadrable does not store empty nodes, so there are special node types (see FIXME
 * Branch Both: Neither are empty.
 
 
+### Bubbling
+
+Because of collapsed leaves, a branch implies that there are at least 2 leaves below the branch. Since an important requirement of Qudrable is that equivalent trees have equivalent roots, it is important to maintain this invariant when a leaf is deleted.
+
+In order to keep all leaves collapsed to the lowest possible depth, a deletion may require moving a leaf several levels further up, potentially even up to the root (if it is the only remaining leaf in the tree). This is called "bubbling" the leaf back up:
+
+![](docs/bubbling.svg)
+
+
+
 ## Storage
 
 ### LMDB
