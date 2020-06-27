@@ -231,7 +231,7 @@ So by caching the value of the empty sub-tree at depth N, we can easily compute 
 
 Quadrable makes two minor changes to this model of sparseness that help simplify the implementation:
 
-1. An empty leaf is given a `nodeHash` of 32 zero bytes. Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf or node that has an all zero hash.
+1. An empty leaf is given a `nodeHash` of 32 zero bytes. Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf or node that has an all zero hash. So, nobody can find a leaf value that is treated equivalent to an empty leaf.
 1. The hash function used when combining two children nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual. Again, it is computationally infeasible to find another input that has 32 zero bytes as an output.
 
 The consequences of these changes is that empty sub-trees at all depths have 32 zero bytes as their `nodeHash`. This includes the root node, so a totally empty tree will have a root of 32 zeros.
@@ -255,7 +255,7 @@ In order to prevent this, we need to hash the path information along with the le
 
     leafNodeHash = H(depth || H(key) || H(value))
 
-* The `depth` is a single byte that indicates at what level the node was collapsed.
+* `depth` is a single byte that indicates at what level the node was collapsed.
 * The hashed key is 32 bytes and represents the path from the root to the leaf.
 * The hashed value is also 32 bytes, and represents the value stored in this leaf.
 
@@ -264,6 +264,22 @@ There are two reasons for using the hash of the value rather than the value itse
 * For non-inclusion proofs (see FIXME) it is sometimes necessary to send a leaf along with the proof to show that a different leaf lies along the path where the queried leaf exists. In this case, where the verifier doesn't care about the contents of this "witness leaf", we can just include the hash of the value in the proof, which could potentially be much smaller than the full value. Note that the verifier still has enough information to move this witness leaf in their partial tree, if they wish to set the non-inclusion proved value.
 * We can see that the input to the hash function when hashing a leaf is always 65 bytes. By contrast, the input to the hash function when combining nodes is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, or vice versa.
 
+
+### Spliting Leaves
+
+Since a collapsed leaf is occupying a spot high up in the tree, that could potentially be in the way of new leafs with the same key prefix, it is sometimes necessary to "split" a collapsed leaf during an insertion. A new branch node will be added in place of the collapsed leaf, and both leafs will be inserted further down underneath this branch. 
+
+![](docs/split-leaf.svg)
+
+In some cases splitting a leaf will result in multiple branches being added. This happens when the leaf being added shares additional prefix bits with the leaf being split. These extra intermediate branches have one of their as the empty node.
+
+![](docs/add-branch-empty.svg)
+
+Quadrable does not store empty nodes, so there are special node types (see FIXME) to indicate if either of the children are empty sub-trees:
+
+* Branch Left: The right node is empty.
+* Branch Right: The left node is empty.
+* Branch Both: Neither are empty.
 
 
 ## Storage
@@ -308,7 +324,7 @@ The meaning of the remaining bytes depend on the nodeType:
     branch left:  [8 bytes: \x01 | leftNodeId << 8]  [32 bytes: nodeHash]
     branch right: [8 bytes: \x02 | rightNodeId << 8] [32 bytes: nodeHash]
     branch both:  [8 bytes: \x03 | leftNodeId << 8]  [32 bytes: nodeHash] [8 bytes: right nodeId]
-    leaf:         [8 bytes: \x04 | 0]                [32 bytes: nodeHash[ [32 bytes: keyHash] [N bytes: val]
+    leaf:         [8 bytes: \x04 | 0]                [32 bytes: nodeHash] [32 bytes: keyHash] [N bytes: val]
  
     witness:      [8 bytes: \x05 | 0]                [32 bytes: nodeHash]
     witnessLeaf:  [8 bytes: \x06 | 0]                [32 bytes: nodeHash] [32 bytes: keyHash] [32 bytes: valHash]
@@ -358,7 +374,7 @@ Quadrable allows arbitrary byte strings as either keys or values. There are no r
 
 Keys and values can be arbitrarily long, with the one exception that the empty string is not allowed as a key.
 
-Although in the `quadb` application some values are presented in hexadecimal encoding, the Quadrature library itself does not handle hexadecimal at all. You may find it convenient to use the `to_hex` and `from_hex` utilities used by `quadb` and the test-suite:
+Although in the `quadb` application some values are presented in hexadecimal encoding, the Quadrable library itself does not use hexadecimal at all. You may find it convenient to use the `to_hex` and `from_hex` utilities used by `quadb` and the test-suite:
 
     #include "hoytech/hex.h"
     using hoytech::to_hex;
@@ -368,7 +384,7 @@ Although in the `quadb` application some values are presented in hexadecimal enc
 
 ### Heads
 
-Many of the operations described in the `quadb` command-line application have counterparts in the C++ library.
+Most of the operations described in the `quadb` command-line application have counterparts in the C++ library.
 
 Note that the command-line application stores its currently checked out head information and other things in a special `quadrable_quadb_state` table, which allows them to persist in between command-line invocations. The C++ library does not use this table. Instead, this information is stored in the `Quadrable` object's memory. Your application and the command-line app can have different heads checked out simultaneously.
 
