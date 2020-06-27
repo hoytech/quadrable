@@ -1200,6 +1200,14 @@ class Quadrable {
         bool deletion = false;
     };
 
+    std::vector<Diff> diff(lmdb::txn &txn, uint64_t nodeIdA, uint64_t nodeIdB) {
+        std::vector<Diff> output;
+
+        diffAux(txn, nodeIdA, nodeIdB, output);
+
+        return output;
+    }
+
     void diffPush(lmdb::txn &txn, ParsedNode &node, std::vector<Diff> &output, bool deletion) {
         std::string_view key;
         getLeafKey(txn, node.nodeId, key);
@@ -1228,14 +1236,6 @@ class Quadrable {
         });
     }
 
-    std::vector<Diff> diff(lmdb::txn &txn, uint64_t nodeIdA, uint64_t nodeIdB) {
-        std::vector<Diff> output;
-
-        diffAux(txn, nodeIdA, nodeIdB, output);
-
-        return output;
-    }
-
     void diffAux(lmdb::txn &txn, uint64_t nodeIdA, uint64_t nodeIdB, std::vector<Diff> &output) {
         if (nodeIdA == nodeIdB) return;
 
@@ -1249,10 +1249,10 @@ class Quadrable {
             diffAux(txn, nodeA.rightNodeId, nodeB.rightNodeId, output);
         } else if (!nodeA.isBranch() && nodeB.isBranch()) {
             // All keys in B were added (except maybe if A is a leaf)
-            bool processed = false;
+            bool foundLeaf = false;
             diffWalk(txn, nodeIdB, [&](ParsedNode &node){
                 if (nodeA.isLeaf() && node.leafKeyHash() == nodeA.leafKeyHash()) {
-                    processed = true;
+                    foundLeaf = true;
                     if (node.leafVal() != nodeA.leafVal()) {
                         diffPushDel(txn, nodeA, output);
                         diffPushAdd(txn, node, output);
@@ -1261,13 +1261,13 @@ class Quadrable {
                     diffPushAdd(txn, node, output);
                 }
             });
-            if (nodeA.isLeaf() && !processed) diffPushDel(txn, nodeA, output);
+            if (nodeA.isLeaf() && !foundLeaf) diffPushDel(txn, nodeA, output);
         } else if (nodeA.isBranch() && !nodeB.isBranch()) {
             // All keys in A were deleted (except maybe if B is a leaf)
-            bool processed = false;
+            bool foundLeaf = false;
             diffWalk(txn, nodeIdA, [&](ParsedNode &node){
                 if (nodeB.isLeaf() && node.leafKeyHash() == nodeB.leafKeyHash()) {
-                    processed = true;
+                    foundLeaf = true;
                     if (node.leafVal() != nodeB.leafVal()) {
                         diffPushDel(txn, nodeB, output);
                         diffPushAdd(txn, node, output);
@@ -1276,7 +1276,7 @@ class Quadrable {
                     diffPushDel(txn, node, output);
                 }
             });
-            if (nodeB.isLeaf() && !processed) diffPushAdd(txn, nodeB, output);
+            if (nodeB.isLeaf() && !foundLeaf) diffPushAdd(txn, nodeB, output);
         } else if (nodeA.isLeaf() && nodeB.isLeaf()) {
             if (nodeA.leafKeyHash() != nodeB.leafKeyHash() || nodeA.leafVal() != nodeB.leafVal()) {
                 diffPushDel(txn, nodeA, output);
