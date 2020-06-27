@@ -247,6 +247,8 @@ Although using the sparseness optimisation described above makes it feasible to 
 
 In order to avoid this overhead, Quadrable uses another optimisation called *collapsed leaves*. In this case, whenever a sub-tree contains exactly one non-empty leaf node (implying all the other leaves are empty), this sub-tree is not stored or computed. Instead, only the leaf is stored. If the leaf is collapsed to depth N, then only N intermediate nodes need to be traversed to get to it from the root.
 
+![](docs/collapsed-leaves.svg)
+
 The obvious issue with this approach is that we lose the ability to distinguish which of the many leaves in the sub-tree is the non-empty one. Even if we were to store the key hash alongside the leaf, a prover would not be able to trust this value if it was provided alongside a proof. The consequence is that a leaf could be "moved around" within a sub-tree, without affecting the root.
 
 In order to prevent this, we need to hash the path information along with the leaf's value when computing a collapsed leaf's `nodeHash`:

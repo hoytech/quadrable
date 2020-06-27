@@ -180,16 +180,16 @@
      transform="translate(-141.25059,-34.724303)">
     <text
        xml:space="preserve"
-       style="font-style:normal;font-weight:normal;font-size:7.41934061px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.18548352"
-       x="140.57677"
-       y="40.361263"
+       style="font-style:normal;font-weight:normal;font-size:5.46652699px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.13666318"
+       x="154.17227"
+       y="41.712402"
        id="text817"><tspan
          sodipodi:role="line"
          id="tspan815"
-         x="140.57677"
-         y="40.361263"
-         style="stroke-width:0.18548352">hash(key) = <tspan
-   style="fill:#ff0000;stroke-width:0.18548352"
+         x="154.17227"
+         y="41.712402"
+         style="stroke-width:0.13666318">hash(key) = <tspan
+   style="fill:#ff0000;stroke-width:0.13666318"
    id="tspan1730">101</tspan>... (in binary)</tspan></text>
     <circle
        style="fill:#0000ff;fill-opacity:1;stroke:#0000ff;stroke-width:1.08022463;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
