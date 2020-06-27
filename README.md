@@ -17,7 +17,7 @@ Although not required to use the library, it may help to understand the core dat
 Values are authenticated by generating and importing proofs:
 
 * *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of hashes as a proof. The value is hashed and then combined with this list in order to reconstruct the hashes of the intermediate nodes. If at the end of the list you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have a lot of space overhead due to duplicated hashes. Also, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
-* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable takes advantage of this by building a partial-tree when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access values not in the authenticated set. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs exported from the same tree can be merged in so a partial-tree can be expanded over time as new proofs are received. New compact proofs can also be generated *from* a partial-tree, as long as the values to authenticate are a subset of the values in the partial-tree.
+* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a partial-tree when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New compact proofs can also be generated *from* a partial-tree, as long as the values to prove are authenticated in the partial-tree.
 
 
 ## Building
@@ -213,7 +213,7 @@ The advantage of a merkle tree is that the nodeHash of the node at depth 0 (the 
 
 ### Keys
 
-For all operations, keys are first hashed and then these hashes are used to traverse the tree to find the locations where the values are stored:
+In Quadrable's implementation of a merkle tree, keys are first hashed and then the bits these hashes are used to traverse the tree to find the locations where the values are stored:
 
 ![](docs/path.svg)
 
@@ -221,7 +221,7 @@ Keys are hashed for multiple reasons:
 
 * It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we collapse leaves, as described in FIXME).
 * Since the hash function used by Quadrable is believed to be cryptographically secure (meaning among other things that it acts like a [random oracle](https://eprint.iacr.org/2015/140.pdf)), the keys should be fairly evenly distributed which reduces the average depth of the tree.
-* It is computationally expensive to find two or more keys that have the same hash prefix, which an adversarial user might like to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See the FIXME section
+* It is computationally expensive to find two or more keys that have the same hash prefix, which an adversarial user might like to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See the FIXME adversarial section
 
 
 
@@ -235,27 +235,32 @@ By caching the value of the empty sub-tree at depth N, we can easily compute the
 
 Quadrable makes two minor changes to this model of sparseness that help simplify the implementation:
 
-1. An empty leaf is given a nodeHash of 32 zero bytes. Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf or node that has an all zero hash. So, nobody can find a leaf value that is treated equivalent to an empty leaf.
-1. The hash function used when combining two child nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual. Again, it is computationally infeasible to find another input that has 32 zero bytes as an output.
+1. An empty leaf is given a nodeHash of 32 zero bytes.
+1. The hash function used when combining two child nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual.
 
-The consequences of these changes is that empty sub-trees at all depths have 32 zero bytes as their nodeHash. This includes the root node, so a totally empty tree will have a root of 32 zeros.
+Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf that has an all zero hash. Because the override is not used when hashing leaves (and also because of the different hashing domains, see the next section), it is also computationally infeasible to find a non-empty node that is interpreted as a leaf, and vice versa.
+
+The purpose of these changes is to make empty sub-trees at all depths have 32 zero bytes as their nodeHashes. This includes the root node, so a totally empty tree will have a root of 32 zeros.
 
 * All zero roots are user-friendly: It's easy to recognize an empty tree.
-* A run of zeros will compress better (or is cheaper, if zero bytes are discounted), so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
-* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimizations (though it is possible to code without needing storage loads either way, by pre-computing and embedding the empty values in the contract code).
+* A run of zeros will compress better, so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
+* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimizations. Specifically, 0 bytes in the calldata is cheaper on gas, contract code size is reduced, and "uninitialized" memory can be used for some operations. It does not save on storage loads though -- only a very naive implementation would store the cached empty values in storage as opposed to contract code.
 
 
 ### Collapsed Leaves
 
-Although using the sparseness optimisation described above makes it feasible to simulate a binary tree with a depth of 256, it still requires us to traverse 256 nodes to get to a leaf. And adding a new leaf requires creating 256 new nodes and 256 calls of the hash function.
+Although using the sparseness optimisation described above makes it feasible to simulate a binary tree with a depth of 256, it still would require us to traverse 256 nodes to get to a leaf. Adding a new leaf would require calling the hash function 256 times and creating 256 new nodes.
 
-In order to avoid this overhead, Quadrable uses another optimisation called *collapsed leaves*. In this case, whenever a sub-tree contains exactly one non-empty leaf node (implying all the others are empty), this sub-tree is not stored or computed. Instead, only the non-empty leaf is stored. If the leaf is collapsed to depth N, then only N intermediate nodes need to be traversed to get to it from the root.
+In order to avoid this overhead, Quadrable uses another optimisation called *collapsed leaves*. In this case, whenever a sub-tree contains exactly one non-empty leaf node (implying all the others are empty), this sub-tree is not stored or computed. Instead, only the non-empty leaf is stored. If the leaf is collapsed at depth N, then only N intermediate nodes need to be traversed to get to it from the root.
 
 ![](docs/collapsed-leaves.svg)
 
-The obvious issue with this approach is that we lose the ability to distinguish which of the many leaves in the sub-tree is the non-empty one. Suppose we were to store the key in our database also. Although we could then distinguish it, somebody else would not be able to trust this value if it was provided alongside a proof. The consequence is that a leaf could be "moved around" within a sub-tree, without affecting the root.
+* Leaves must always be collapsed at the highest possible level to ensure that equivalent trees have equivalent roots.
+* In Quadrable, there is no such thing as a non-collapsed leaf: All leaves are collapsed. For a leaf to reach the very bottom level, there would need to be two distinct keys with the same keyHash (except for the last bit). The collision-resistance property of our hash function allows us to assume this will never happen.
 
-In order to prevent this, we hash the path information along with the leaf's value when computing a collapsed leaf's nodeHash:
+An issue with collapsing leaves is that we could lose the ability to distinguish which of the leaves in the sub-tree is the non-empty one. We could not create proofs for these leaves since other people would not be able to detect if we had "moved around" the leaf within the sub-tree.
+
+In order to prevent this, Quadrable hashes the path information along with the leaf's value when computing a collapsed leaf's nodeHash:
 
     leafNodeHash = H(depth || H(key) || H(value))
 
@@ -271,11 +276,11 @@ There are two reasons for using the hash of the value rather than the value itse
 
 ### Spliting Leaves
 
-Since a collapsed leaf is occupying a spot high up in the tree that could potentially be in the way of new leaves with the same key prefix, it is sometimes necessary to "split" a collapsed leaf during an insertion. A new branch node will be added in place of the collapsed leaf, and both leaves will be inserted further down underneath this branch. 
+Since a collapsed leaf is occupying a spot high up in the tree that could potentially be in the way of new leaves with the same key prefix, during an insertion it is sometimes necessary to "split" a collapsed leaf. A new branch node will be added in place of the collapsed leaf, and both leaves will be inserted further down underneath this branch. 
 
 ![](docs/split-leaf.svg)
 
-In some cases splitting a leaf will result in multiple branches being added. This happens when the leaf being added shares additional prefix bits with the leaf being split. These extra intermediate branches have an empty node as one of their children.
+In some cases splitting a leaf will result in more than one branches being added. This happens when the leaf being added shares additional prefix bits with the leaf being split. These extra intermediate branches have empty nodes as one of their children.
 
 ![](docs/add-branch-empty.svg)
 
