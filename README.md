@@ -221,7 +221,7 @@ The advantage of a merkle tree is that the nodeHash of the node at depth 0 (the 
 
 ### Keys
 
-In Quadrable's implementation of a merkle tree, keys are first hashed and then the bits these hashes are used to traverse the tree to find the locations where the values are stored:
+In Quadrable's implementation of a merkle tree, keys are first hashed and then the bits these hashes are used to traverse the tree to find the locations where the values are stored. A `0` bit means to use the left child of a node, and a `1` bit means use the right child:
 
 ![](docs/path.svg)
 
@@ -237,7 +237,7 @@ Keys are hashed for multiple reasons:
 
 Obviously creating a full tree with 2^256 possible key paths is impossible. Fortunately, there is [an optimization](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
 
-By caching the value of the empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them when needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
+By caching the value of an empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them when needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
 
 ![](docs/sparse.svg)
 
@@ -329,7 +329,7 @@ Since leaves are never deleted during an update, they can continue to exist in t
 
 So far the data-structure we've described is just an expensive way to store a tree of data. The reason why we're doing all this hashing in the first place is so that we can create *proofs* about the contents of our tree.
 
-A proof is a record from the tree along with enough information for somebody who does not have a copy of the tree to reconstruct the root of the tree. This reconstructed root can then be compared with a version of the root acquired elsewhere, from a trusted source. Imagine that the root is published daily in a newspaper, or is embedded on a blockchain.
+A proof is a record from the tree along with enough information for somebody who does not have a copy of the tree to reconstruct the root of the tree. This reconstructed root can then be compared with a version of the root acquired elsewhere, from a trusted source. Imagine that the root is published daily in a newspaper, or is embedded in a blockchain.
 
 The purpose of using a tree structure is so that the information required in a proof is proportional to the depth of the tree, and not the total number of nodes.
 
