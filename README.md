@@ -270,16 +270,16 @@ An issue with collapsing leaves is that we could lose the ability to distinguish
 
 In order to prevent this, Quadrable hashes the path information along with the leaf's value when computing a collapsed leaf's nodeHash:
 
-    leafNodeHash = H(depth || H(key) || H(value))
+    leafNodeHash = H(H(key) || H(value) || '\0')
 
-* `depth` is a single byte that indicates at what level the node was collapsed.
 * The hashed key is 32 bytes and represents the path from the root to the leaf.
 * The hashed value is also 32 bytes, and represents the value stored in this leaf.
+* `'\0'` is a single null byte (see below).
 
 There are two reasons for using the hash of the value rather than the value itself:
 
 * For non-inclusion proofs (see FIXME) it is sometimes necessary to send a leaf along with the proof to show that a different leaf lies along the path where the queried leaf exists. In this case, where the verifier doesn't care about the contents of this "witness leaf", we can just include the hash of the value in the proof, which could potentially be much smaller than the full value. Note that the verifier still has enough information to move this witness leaf around in their partial-tree.
-* It ensures the input when hashing a leaf is always 65 bytes. By contrast, the input when hashing two nodeHashes to get the parent's nodeHash is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, and vice versa.
+* Combined with the null byte, this ensures the input when hashing a leaf is always 65 bytes long. By contrast, the input when hashing two nodeHashes to get the parent's nodeHash is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, and vice versa.
 
 
 ### Splitting Leaves
@@ -307,6 +307,20 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 ![](docs/bubbling.svg)
 
+
+### Copy-On-Write
+
+In the diagrams above it nodes in the tree as being modified during an update. This makes it easier to explain what is happening, but is not actually how the data structure is implemented (sorry about that!). To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
+
+In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the splitting leaves section above (FIXME link), but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted line):
+
+![](docs/cow.svg)
+
+Notice how references to the original tree remain valid after the update.
+
+This copy-on-write behaviour is why our diagrams have the arrows pointing from parent to child. Most descriptions of merkle trees have the arrows pointing the other direction, because that is the direction the hashing is performed (you must hash the children before the parents). In our case the arrows are pointing to how the nodes reference each-other, which is the order of traversal when looking up a record.
+
+Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be recovered with a run of the garbage collector. This scans all the trees to find unreachable nodes, and then deletes them. See FIXME
 
 
 
