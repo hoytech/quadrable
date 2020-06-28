@@ -739,7 +739,7 @@ void doTests() {
             "14864808866", // 00...
         }));
 
-        verify(proof.elems.size() == 1); // No separate WitnessEmpty is needed because a HashEmpty cmd is on existing node's path
+        verify(proof.strands.size() == 1); // No separate WitnessEmpty is needed because a HashEmpty cmd is on existing node's path
 
         db.checkout();
 

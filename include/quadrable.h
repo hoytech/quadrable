@@ -146,13 +146,13 @@ using GetMultiQuery = std::map<std::string, GetMultiResult>;
 
 
 
-struct ProofElem {
+struct ProofStrand {
     enum class Type {
         Invalid = 0,
         Leaf = 1,
         WitnessLeaf = 2,
         WitnessEmpty = 3,
-    } elemType;
+    } strandType;
     uint64_t depth;
     std::string keyHash;
     std::string val;  // Type::Leaf: value, Type::WitnessLeaf: hash(value), Type::WitnessEmpty: ignored
@@ -170,7 +170,7 @@ struct ProofCmd {
 };
 
 struct Proof {
-    std::vector<ProofElem> elems;
+    std::vector<ProofStrand> strands;
     std::vector<ProofCmd> cmds;
 };
 
@@ -779,7 +779,7 @@ class Quadrable {
     struct ProofGenItem {
         uint64_t nodeId;
         uint64_t parentNodeId;
-        ProofElem elem;
+        ProofStrand strand;
     };
 
     using ProofGenItems = std::vector<ProofGenItem>;
@@ -805,7 +805,7 @@ class Quadrable {
         output.cmds = exportProofCmds(txn, items, reverseMap, headNodeId);
 
         for (auto &item : items) {
-            output.elems.emplace_back(std::move(item.elem));
+            output.strands.emplace_back(std::move(item.strand));
         }
 
         return output;
@@ -825,7 +825,7 @@ class Quadrable {
             items.emplace_back(ProofGenItem{
                 nodeId,
                 parentNodeId,
-                ProofElem{ ProofElem::Type::WitnessEmpty, depth, h.str(), },
+                ProofStrand{ ProofStrand::Type::WitnessEmpty, depth, h.str(), },
             });
         } else if (node.isLeaf()) {
             if (std::any_of(begin, end, [&](auto &i){ return i.first == node.leafKeyHash(); })) {
@@ -839,13 +839,13 @@ class Quadrable {
                 items.emplace_back(ProofGenItem{
                     nodeId,
                     parentNodeId,
-                    ProofElem{ ProofElem::Type::Leaf, depth, std::string(node.leafKeyHash()), std::string(node.leafVal()), std::string(leafKey) },
+                    ProofStrand{ ProofStrand::Type::Leaf, depth, std::string(node.leafKeyHash()), std::string(node.leafVal()), std::string(leafKey) },
                 });
             } else {
                 items.emplace_back(ProofGenItem{
                     nodeId,
                     parentNodeId,
-                    ProofElem{ ProofElem::Type::WitnessLeaf, depth, std::string(node.leafKeyHash()), node.leafValHash(), },
+                    ProofStrand{ ProofStrand::Type::WitnessLeaf, depth, std::string(node.leafKeyHash()), node.leafValHash(), },
                 });
             }
         } else if (node.isBranch()) {
@@ -857,7 +857,7 @@ class Quadrable {
             if (node.leftNodeId) reverseMap.emplace(node.leftNodeId, nodeId);
             if (node.rightNodeId) reverseMap.emplace(node.rightNodeId, nodeId);
 
-            // If one side is empty and the other side has elements to prove, don't go down the empty side.
+            // If one side is empty and the other side has strandents to prove, don't go down the empty side.
             // This avoids unnecessary empty witnesses, since they will be satisfied with HashEmpty cmds from the other side.
 
             if (node.leftNodeId || middle == end) exportProofAux(txn, depth+1, node.leftNodeId, nodeId, begin, middle, items, reverseMap);
@@ -887,8 +887,8 @@ class Quadrable {
 
         for (size_t i = 0; i < items.size(); i++) {
             auto &item = items[i];
-            maxDepth = std::max(maxDepth, item.elem.depth);
-            accums.emplace_back(GenProofItemAccum{ i, item.elem.depth, item.nodeId, static_cast<ssize_t>(i+1), });
+            maxDepth = std::max(maxDepth, item.strand.depth);
+            accums.emplace_back(GenProofItemAccum{ i, item.strand.depth, item.nodeId, static_cast<ssize_t>(i+1), });
         }
 
         accums.back().next = -1;
@@ -988,21 +988,21 @@ class Quadrable {
     BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof) {
         std::vector<ImportProofItemAccum> accums;
 
-        for (size_t i = 0; i < proof.elems.size(); i++) {
-            auto &elem = proof.elems[i];
-            auto keyHash = Hash::existingHash(elem.keyHash);
+        for (size_t i = 0; i < proof.strands.size(); i++) {
+            auto &strand = proof.strands[i];
+            auto keyHash = Hash::existingHash(strand.keyHash);
             auto next = static_cast<ssize_t>(i+1);
 
-            if (elem.elemType == ProofElem::Type::Leaf) {
-                auto info = BuiltNode::newLeaf(this, txn, keyHash, elem.val, elem.key);
-                accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
-            } else if (elem.elemType == ProofElem::Type::WitnessLeaf) {
-                auto info = BuiltNode::newWitnessLeaf(this, txn, keyHash, Hash::existingHash(elem.val));
-                accums.emplace_back(ImportProofItemAccum{ elem.depth, info.nodeId, next, keyHash, info.nodeHash, });
-            } else if (elem.elemType == ProofElem::Type::WitnessEmpty) {
-                accums.emplace_back(ImportProofItemAccum{ elem.depth, 0, next, keyHash, Hash::nullHash(), });
+            if (strand.strandType == ProofStrand::Type::Leaf) {
+                auto info = BuiltNode::newLeaf(this, txn, keyHash, strand.val, strand.key);
+                accums.emplace_back(ImportProofItemAccum{ strand.depth, info.nodeId, next, keyHash, info.nodeHash, });
+            } else if (strand.strandType == ProofStrand::Type::WitnessLeaf) {
+                auto info = BuiltNode::newWitnessLeaf(this, txn, keyHash, Hash::existingHash(strand.val));
+                accums.emplace_back(ImportProofItemAccum{ strand.depth, info.nodeId, next, keyHash, info.nodeHash, });
+            } else if (strand.strandType == ProofStrand::Type::WitnessEmpty) {
+                accums.emplace_back(ImportProofItemAccum{ strand.depth, 0, next, keyHash, Hash::nullHash(), });
             } else {
-                throw quaderr("unrecognized ProofItem type: ", int(elem.elemType));
+                throw quaderr("unrecognized ProofItem type: ", int(strand.strandType));
             }
         }
 
@@ -1010,10 +1010,10 @@ class Quadrable {
 
 
         for (auto &cmd : proof.cmds) {
-            if (cmd.nodeOffset >= proof.elems.size()) throw quaderr("nodeOffset in cmd is out of range");
+            if (cmd.nodeOffset >= proof.strands.size()) throw quaderr("nodeOffset in cmd is out of range");
             auto &accum = accums[cmd.nodeOffset];
 
-            if (accum.merged) throw quaderr("element already merged");
+            if (accum.merged) throw quaderr("strandent already merged");
             if (accum.depth == 0) throw quaderr("node depth underflow");
 
             BuiltNode siblingInfo;
@@ -1049,7 +1049,7 @@ class Quadrable {
             accum.nodeHash = branchInfo.nodeHash;
         }
 
-        if (accums[0].next != -1) throw quaderr("not all proof elems were merged");
+        if (accums[0].next != -1) throw quaderr("not all proof strands were merged");
         if (accums[0].depth != 0) throw quaderr("proof didn't reach root");
 
         return BuiltNode::stubbed(accums[0].nodeId, accums[0].nodeHash);

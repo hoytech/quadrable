@@ -97,24 +97,24 @@ static inline void dumpStats(quadrable::Quadrable &db, lmdb::txn &txn) {
 
 
 static inline void dumpProof(const Proof &p) {
-    std::cout << "ITEMS (" << p.elems.size() << "):\n";
+    std::cout << "ITEMS (" << p.strands.size() << "):\n";
 
-    for (size_t i=0; i<p.elems.size(); i++) {
-        auto &elem = p.elems[i];
+    for (size_t i=0; i<p.strands.size(); i++) {
+        auto &strand = p.strands[i];
 
-        std::string elemType = elem.elemType == ProofElem::Type::Leaf ? "Leaf" :
-                               elem.elemType == ProofElem::Type::WitnessLeaf ? "WitnessLeaf" :
-                               elem.elemType == ProofElem::Type::WitnessEmpty ? "WitnessEmpty" :
+        std::string strandType = strand.strandType == ProofStrand::Type::Leaf ? "Leaf" :
+                               strand.strandType == ProofStrand::Type::WitnessLeaf ? "WitnessLeaf" :
+                               strand.strandType == ProofStrand::Type::WitnessEmpty ? "WitnessEmpty" :
                                "?";
 
-        std::cout << "  ITEM " << i << ": " << to_hex(elem.keyHash, true) << ")\n";
-        std::cout << "    " << elemType << "  depth=" << elem.depth << "\n";
+        std::cout << "  ITEM " << i << ": " << to_hex(strand.keyHash, true) << ")\n";
+        std::cout << "    " << strandType << "  depth=" << strand.depth << "\n";
 
-        if (elem.elemType == ProofElem::Type::Leaf) {
-            if (elem.key.size()) std::cout << "    Key: " << elem.key << "\n";
-            std::cout << "    Val: " << elem.val << "\n";
-        } else if (elem.elemType == ProofElem::Type::WitnessLeaf) {
-            std::cout << "    Val hash: " << to_hex(elem.val, true) << "\n";
+        if (strand.strandType == ProofStrand::Type::Leaf) {
+            if (strand.key.size()) std::cout << "    Key: " << strand.key << "\n";
+            std::cout << "    Val: " << strand.val << "\n";
+        } else if (strand.strandType == ProofStrand::Type::WitnessLeaf) {
+            std::cout << "    Val hash: " << to_hex(strand.val, true) << "\n";
         }
     }
 

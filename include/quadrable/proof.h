@@ -35,13 +35,13 @@ std::string varInt(uint64_t n) {
 Proof encoding:
 
 [1 byte proof type]
-[ProofElem]+
+[ProofStrand]+
 [ProofCmd]+
 
 
-ProofElem:
+ProofStrand:
 
-[1 byte elem type, Invalid means end of elems]
+[1 byte strand type, Invalid means end of strands]
 [1 byte depth]
 if Leaf
   if CompactNoKeys:
@@ -87,38 +87,38 @@ static inline std::string encodeProof(const Proof &p, EncodingType encodingType 
 
     // Elements
 
-    for (auto &elem : p.elems) {
-        o += static_cast<unsigned char>(elem.elemType);
-        o += static_cast<unsigned char>(elem.depth);
+    for (auto &strand : p.strands) {
+        o += static_cast<unsigned char>(strand.strandType);
+        o += static_cast<unsigned char>(strand.depth);
 
-        if (elem.elemType == ProofElem::Type::Leaf) {
+        if (strand.strandType == ProofStrand::Type::Leaf) {
             if (encodingType == EncodingType::CompactNoKeys) {
-                o += elem.keyHash;
+                o += strand.keyHash;
             } else if (encodingType == EncodingType::CompactWithKeys) {
-                if (elem.key.size() == 0) throw quaderr("CompactWithKeys specified in proof encoding, but key not available");
-                o += varInt(elem.key.size());
-                o += elem.key;
+                if (strand.key.size() == 0) throw quaderr("CompactWithKeys specified in proof encoding, but key not available");
+                o += varInt(strand.key.size());
+                o += strand.key;
             }
 
-            o += varInt(elem.val.size());
-            o += elem.val;
-        } else if (elem.elemType == ProofElem::Type::WitnessLeaf) {
-            o += elem.keyHash;
-            o += elem.val; // holds valHash
-        } else if (elem.elemType == ProofElem::Type::WitnessEmpty) {
-            o += elem.keyHash;
+            o += varInt(strand.val.size());
+            o += strand.val;
+        } else if (strand.strandType == ProofStrand::Type::WitnessLeaf) {
+            o += strand.keyHash;
+            o += strand.val; // holds valHash
+        } else if (strand.strandType == ProofStrand::Type::WitnessEmpty) {
+            o += strand.keyHash;
         } else {
-            throw quaderr("unrecognized ProofElem::Type when encoding proof: ", (int)elem.elemType);
+            throw quaderr("unrecognized ProofStrand::Type when encoding proof: ", (int)strand.strandType);
         }
     }
 
-    o += static_cast<unsigned char>(ProofElem::Type::Invalid); // end of elem list
+    o += static_cast<unsigned char>(ProofStrand::Type::Invalid); // end of strand list
 
     // Cmds
 
-    if (p.elems.size() == 0) return o;
+    if (p.strands.size() == 0) return o;
 
-    uint64_t currPos = p.elems.size() - 1; // starts at end
+    uint64_t currPos = p.strands.size() - 1; // starts at end
     std::vector<ProofCmd> hashQueue;
 
     auto flushHashQueue = [&]{
@@ -227,42 +227,42 @@ static inline Proof decodeProof(std::string_view encoded) {
     // Elements
 
     while (1) {
-        auto elemType = static_cast<ProofElem::Type>(getByte());
+        auto strandType = static_cast<ProofStrand::Type>(getByte());
 
-        if (elemType == ProofElem::Type::Invalid) break; // end of elems
+        if (strandType == ProofStrand::Type::Invalid) break; // end of strands
 
-        ProofElem elem{elemType};
+        ProofStrand strand{strandType};
 
-        elem.depth = getByte();
+        strand.depth = getByte();
 
-        if (elemType == ProofElem::Type::Leaf) {
+        if (strandType == ProofStrand::Type::Leaf) {
             if (encodingType == EncodingType::CompactNoKeys) {
-                elem.keyHash = std::string(getBytes(32));
+                strand.keyHash = std::string(getBytes(32));
             } else if (encodingType == EncodingType::CompactWithKeys) {
                 auto keySize = getVarInt();
-                elem.key = std::string(getBytes(keySize));
-                elem.keyHash = Hash::hash(elem.key).str();
+                strand.key = std::string(getBytes(keySize));
+                strand.keyHash = Hash::hash(strand.key).str();
             }
 
             auto valSize = getVarInt();
-            elem.val = std::string(getBytes(valSize));
-        } else if (elemType == ProofElem::Type::WitnessLeaf) {
-            elem.keyHash = std::string(getBytes(32));
-            elem.val = std::string(getBytes(32)); // holds valHash
-        } else if (elemType == ProofElem::Type::WitnessEmpty) {
-            elem.keyHash = std::string(getBytes(32));
+            strand.val = std::string(getBytes(valSize));
+        } else if (strandType == ProofStrand::Type::WitnessLeaf) {
+            strand.keyHash = std::string(getBytes(32));
+            strand.val = std::string(getBytes(32)); // holds valHash
+        } else if (strandType == ProofStrand::Type::WitnessEmpty) {
+            strand.keyHash = std::string(getBytes(32));
         } else {
-            throw quaderr("unrecognized ProofElem::Type when decoding proof: ", (int)elemType);
+            throw quaderr("unrecognized ProofStrand::Type when decoding proof: ", (int)strandType);
         }
 
-        proof.elems.emplace_back(std::move(elem));
+        proof.strands.emplace_back(std::move(strand));
     }
 
     // Cmds
 
-    if (proof.elems.size() == 0) return proof;
+    if (proof.strands.size() == 0) return proof;
 
-    uint64_t currPos = proof.elems.size() - 1; // starts at end
+    uint64_t currPos = proof.strands.size() - 1; // starts at end
 
     while (encoded.size()) {
         auto byte = getByte();
@@ -299,8 +299,8 @@ static inline Proof decodeProof(std::string_view encoded) {
                 currPos -= 1 << (distance + 6);
             }
 
-            if (currPos > proof.elems.size()) { // rely on unsigned underflow to catch negative range
-                throw quaderr("jumped outside of proof elems");
+            if (currPos > proof.strands.size()) { // rely on unsigned underflow to catch negative range
+                throw quaderr("jumped outside of proof strands");
             }
         }
     }
