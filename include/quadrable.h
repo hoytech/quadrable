@@ -583,7 +583,7 @@ class Quadrable {
 
     BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp) {
         ParsedNode node(txn, dbi_node, nodeId);
-        bool didBubble = false;
+        bool checkBubble = false;
 
         // recursion base cases
 
@@ -626,7 +626,7 @@ class Quadrable {
             updates.eraseRange(begin, end, [&](UpdateSetMap::iterator &u){
                 if (u->second.deletion && u->first == node.leafKeyHash()) {
                     deleteThisLeaf = true;
-                    didBubble = true; // so we check the status of this node after handling any changes further down (may require bubbling up)
+                    checkBubble = true; // so we check the status of this node after handling any changes further down (may require bubbling up)
                 }
                 return u->second.deletion;
             });
@@ -665,10 +665,10 @@ class Quadrable {
 
         checkDepth(depth);
 
-        auto leftNode = putAux(txn, depth+1, node.leftNodeId, updates, begin, middle, didBubble);
-        auto rightNode = putAux(txn, depth+1, node.rightNodeId, updates, middle, end, didBubble);
+        auto leftNode = putAux(txn, depth+1, node.leftNodeId, updates, begin, middle, checkBubble);
+        auto rightNode = putAux(txn, depth+1, node.rightNodeId, updates, middle, end, checkBubble);
 
-        if (didBubble) {
+        if (checkBubble) {
             if (leftNode.nodeType == NodeType::Witness || rightNode.nodeType == NodeType::Witness) {
                 // We don't know if one of the nodes is a branch or a leaf
                 throw quaderr("can't bubble a witness node");
