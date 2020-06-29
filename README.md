@@ -421,7 +421,7 @@ By the way, consider the degenerate case of creating a proof for *all* the leave
 
 So far we have discussed proving that a queried value exists in the database. For many applications it is also necessary to be able to prove that a value does *not* exist in the database. These are called "non-inclusion proofs".
 
-In a pure sparse merkle tree, every leaf is conceptually present in the tree, even if they are empty. In this case it would be sufficient to provide a proof showing the existence of an empty leaf along the queried path. However, Quadrable uses the collapsed leaf optimisation which means that this will not work since the paths to the empty leaves might be blocked by collapsed leaves. Because of this, non-inclusion proofs are slightly more complicated, however this is well worth the reduction in proof sizes we get from collapsed nodes.
+In a pure sparse merkle tree, every leaf is conceptually present in the tree, even if they are empty. In this case it would be sufficient to provide an existence proof for the corresponding empty leaf. However, Quadrable uses the collapsed leaf optimisation which means that this will not work since the paths to the empty leaves might be blocked by collapsed leaves. Because of this, non-inclusion proofs are slightly more complicated, however this is well worth the reduction in proof sizes we get from collapsed nodes.
 
 To provide a non-inclusion proof, Quadrable uses one of two methods, depending on the structure of the tree and the key hash of the queried record.
 
@@ -433,14 +433,16 @@ The second method is to present a leaf node that is on the corresponding path, b
 
 ![](docs/non-inclusion-witnessleaf.svg)
 
-Both of these methods are proved just like inclusion proofs: There is an untrusted value that will be hashed and then combined with witnesses up the tree until a candidate root node is reached. If this candidate root matches the trusted root then the non-inclusion proof is satisifed.
+Both of these methods are proved in the same way as inclusion proofs: There is an untrusted value that will be hashed and then combined with witnesses up the tree until a candidate root node is reached. If this candidate root matches the trusted root then the non-inclusion proof is satisifed.
 
-Witness leaves are just like regular proof-of-inclusion leaves, except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value (which may be quite large): They merely wish to prove that it is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible for a leaf to be used for a non-inclusion instead of a witness leaf. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
+Witness leaves are like regular proof-of-inclusion leaves except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value (which may be quite large). Instead, they merely wish to prove that it is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible for a leaf to be used for a non-inclusion proof instead of a witness leaf. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
 
 
 
 
 ### Strands
+
+![](docs/strands1.svg)
 
 Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data (although practically it's easier to have 2 passes: a setup pass and a processing pass). They can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will result in a ready-to-use partial-tree.
 
@@ -469,8 +471,6 @@ The first thing the verifier should do is run some initial setup on each strand:
 ### Commands
 
 In addition to the list of strands, a Quadrable proof includes a list of commands. These are instructions on how to process the strands. After running all the commands, then the root will be reconstructed and the proof verified (hopefully).
-
-![](docs/strands1.svg)
 
 Every command specifies a strand by its index in the strand list. After running a command this strand's depth will decrease by 1.
 
