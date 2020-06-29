@@ -360,7 +360,7 @@ Now you need to compute the next parent's hash, which requires another witness. 
 * The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we can trust the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
 
 
-### Proofs for multiple values
+### Combined Proofs
 
 The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes. To do the verification, it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root. The yellow nodes in the above diagrams are computed as part of verifying the proof. 
 
@@ -373,24 +373,12 @@ To prove both of these values independently, we would need to send 8 witnesses i
 * Since we are authenticating values from the same tree, the top 2 witnesses will be the same, and are therefore redundant. We should try to not include the same witness multiple times in a proof.
 * On the third level, the node that was sent as a witness in one proof is a computed node in the other proof, and vice versa. Since the verifier is going to be computing this value anyway, there is no need to send any witnesses for this level.
 
-By the way, consider the degenerate case of creating a proof for *all* the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways.
-
-So, after taking these observations into account, we see that if we are sending a combined proof for these two leaves, we actually only need to send 4 witnesses:
+After taking these observations into account, we see that if we are sending a combined proof for these two leaves, we actually only need to send 4 witnesses:
 
 ![](docs/proof5.svg)
 
+By the way, consider the degenerate case of creating a proof for *all* the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways.
 
-
-### Proof encodings
-
-There are a variety of ways that proofs for multiple values can be encoded. Quadrable has a conceptual separation between a proof and the encoding of a proof, so there can in theory be many ways to encode a proof for multiple values. At the C++ level there is a `quadrable::Proof` class, and it contains an abstract definition of the proof.
-
-In order to serialize this to something that can be transmitted, there is an `encodeProof()` function. It takes two arguments: The proof to encode and the encoding type. So far we have only implemented the following encoding types:
-
-* `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible.
-* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports enumeration by key.
-
-Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parens above.
 
 
 
@@ -417,8 +405,8 @@ The first thing the verifier should do is run some initial setup on each strand:
 
 * Hash the key (if key was included)
 * Compute the nodeHash (if node type was Leaf or WitnessLeaf). This is now called the strand's nodeHash
-* Set a `next` index value to `i+1`, where `i` is the node's index in the list. This functions as a singly-linked list
 * Set a `merged` boolean value to `false`
+* Set a `next` index value to `i+1`, where `i` is the node's index in the list. This functions as a singly-linked list of unmerged strands
 
 ### Commands
 
@@ -428,7 +416,7 @@ In addition to the list of strands, a Quadrable proof includes a list of command
 
 Every command specifies a strand by its index in the strand list. After running a command this strand's depth will decrease by 1.
 
-There are 3 commands:
+There are 3 types of commands ("ops"):
 
 * `HashProvided`: Take the provided witness, concatenate it with the specified strand's nodeHash, and hash, storing the result into this strand's nodeHash. The order of concatenation depends on the `depth` bit of the strand's keyHash.
 * `HashEmpty`: The same as the previous, but there is no provided witness. Instead, the empty sub-tree nodeHash (32 zero bytes) is used.
@@ -440,8 +428,27 @@ While processing commands, implementations should be creating nodes along the wa
 After processing all commands, implementations should check the following:
 
 * The first strand has an empty `next` linked list, meaning all strands have merged into the left-most strand
-* The first strand has a depth of 0, meaning it is the putative root node
+* The first strand has a depth of 0, meaning it is the candidate root node
 * The first strand's nodeHash is equal to the trusted root
+
+
+
+### Proof encodings
+
+There are a variety of ways that proofs could be encoded (whether using the strands model or otherwise). Quadrable has a conceptual separation between a proof and its encoding. At the C++ level there is a `quadrable::Proof` class, and it contains an abstract definition of the proof.
+
+In order to serialize this to something that can be transmitted, there is an `encodeProof()` function. It takes two arguments: The proof to encode and the encoding type. So far we have only implemented the following encoding types:
+
+* `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible.
+* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports enumeration by key.
+
+Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parens above.
+
+Since the two encoding types are so similar, I will describe them concurrently and point out the minor differences as they arise.
+
+
+
+### Compact encoding
 
 
 
@@ -622,3 +629,5 @@ The `GarbageCollector` class can be used to deallocate unneeded nodes. See the i
 Quadrable © 2020 Doug Hoyte.
 
 2-clause BSD license. See the LICENSE file.
+
+Does this stuff interest you? Subscribe for news on my upcoming book: [Zero Copy](https://leanpub.com/zerocopy)!
