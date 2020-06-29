@@ -164,7 +164,7 @@ Running `quadb checkout` with no head name will result in a detached head pointi
 
 ### quadb fork
 
-When we created a new head with checkout, it was initialized to an empty tree. Instead, we may choose to use `quadb fork` to copy the current head to the new head:
+When we created a new head with checkout, it was initialised to an empty tree. Instead, we may choose to use `quadb fork` to copy the current head to the new head:
 
     $ quadb fork temp2
     $ ./quadb head
@@ -252,7 +252,7 @@ The purpose of these changes is to make empty sub-trees at all depths have 32 ze
 
 * All zero roots are user-friendly: It's easy to recognize an empty tree.
 * A run of zeros will compress better, so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
-* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimizations. Specifically, 0 bytes in the calldata is cheaper on gas, contract code size is reduced, and "uninitialized" memory can be used for some operations. It does not save on storage loads though -- only a very naive implementation would store the cached empty values in storage as opposed to contract code.
+* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimizations. Specifically, 0 bytes in the calldata is cheaper on gas, contract code size is reduced, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a very naive implementation would store the cached empty values in storage as opposed to contract code.
 
 
 ### Collapsed Leaves
@@ -310,7 +310,7 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 ### Copy-On-Write
 
-In the diagrams above it nodes in the tree as being modified during an update. This makes it easier to explain what is happening, but is not actually how the data structure is implemented (sorry about that!). To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
+In the diagrams above it shows nodes in the tree being modified during an update. This makes it easier to explain what is happening, but is not actually how the data structure is implemented (sorry about that!). To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
 
 In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the splitting leaves section above (FIXME link), but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted line):
 
@@ -318,7 +318,7 @@ In particular, when a leaf is added/modified, all of the branches on the way bac
 
 Notice how references to the original tree remain valid after the update.
 
-This copy-on-write behaviour is why our diagrams have the arrows pointing from parent to child. Most descriptions of merkle trees have the arrows pointing the other direction, because that is the direction the hashing is performed (you must hash the children before the parents). In our case the arrows are pointing to how the nodes reference each-other, which is the order of traversal when looking up a record.
+This copy-on-write behaviour is why our diagrams have the arrows pointing from parent to child. Most descriptions of merkle trees have the arrows pointing the other direction, because that is the direction the hashing is performed (you must hash the children before the parents). While this is still of course true in Quadrable, in our case we decided to draw the arrows are pointing to how the nodes reference each-other, and is therefore the order of traversal when looking up a record.
 
 Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be recovered with a run of the garbage collector. This scans all the trees to find unreachable nodes, and then deletes them. See FIXME
 
@@ -335,7 +335,7 @@ The purpose of using a tree structure is so that the information required in a p
 
 ### Proofs and witnesses
 
-When you, as a remote user, would like to query the database do the following steps:
+When you would like to query the database remotely, do the following steps:
 
 * Acquire a copy of the root hash (32 bytes) from some trusted source.
 * Hash the key of the record you would like to search for. Let's say you're looking for the record `"John Smith"` and it hashes to `1011` in binary (using a 4-bit hash for sake of explanation, normally this would be 256 bits). This is the path that will be used to traverse the tree to this record.
@@ -343,11 +343,11 @@ When you, as a remote user, would like to query the database do the following st
 
 ![](docs/proof1.svg)
 
-At this point you have a value, but you can't be sure that the JSON wasn't tampered with. Maybe John's balance is actually "$0.05", or perhaps there isn't a record for John Smith at all.
+At this point you have a value, but you can't be sure that the result wasn't tampered with. Maybe John's balance is actually "$0.05", or perhaps there isn't a record for John Smith at all.
 
-In order to convince you that the record is correct, the provider must send a proof along with the JSON. You can use this to proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. The way you do that is by hashing the JSON value you received to compute the leaf hash (in Quadrable, first combine it with the key's hash, see the collapsed leaf section FIXME). Next, compute the hash of the leaf's parent.
+In order to convince you that the record exists and is correct, the provider must send a proof along with the JSON. You can use this to proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. The way you do that is by hashing the JSON value you received to compute the leaf hash (in Quadrable, first combine it with the key's hash, see the collapsed leaf section FIXME). Next, compute the hash of the leaf's parent.
 
-However, to compute the parent node's hash you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This value is known as a *witness* and is part of the proof that is provided:
+Unfortunately, to compute the parent node's hash you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This is solved by sending this value (called a *witness*) as part of the proof:
 
 ![](docs/proof2.svg)
 
@@ -355,16 +355,16 @@ Now you need to compute the next parent's hash, which requires another witness. 
 
 ![](docs/proof3.svg)
 
-* Whether the witness is the left child or the right child depends on the value of the path at that level. If it is a `1` then the witness is on the left, since the value is stored underneath the right node (and vice versa). You can think of a witness as a sub-tree that you don't care about, so you are just getting a summarized value that covers all of the nodes underneath that portion of the tree.
+* Whether the witness is the left child or the right child depends on the value of the path at that level. If it is a `1` then the witness is on the left, since the value is stored underneath the right node (and vice versa). You can think of a witness as a sub-tree that you don't care about, so you are just getting a summarised value that covers all of the nodes underneath that portion of the tree.
 * There is a witness for every level of the tree. Since Quadrable uses collapsed leaves, this will be less than the full size of the hash. If we can assume hashes are randomly distributed, then this will be roughly log2(N): That is, if there are a million items in the DB there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in depth is the beauty of trees and logarithmic growth).
 * The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we can trust the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
 
 
 ### Proofs for multiple values
 
-The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes. Since the prover has the value to be proven, and knows the path (it's the hash of the key), it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root.
+The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes. To do the verification, it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root. The yellow nodes in the above diagrams are computed as part of verifying the proof. 
 
-This is pretty much as good as you can do with the proof for a single leaf (except perhaps indicate empty sub-trees somehow so you don't need to send them along with the proof -- see below). However, let's suppose we want to prove multiple values at the same time. Here are the two proofs for different leaves:
+This is pretty much as good as you can do with the proof for a single leaf (except perhaps to indicate empty sub-trees somehow so you don't need to send them along with the proof -- see below). However, let's suppose we want to prove multiple values at the same time. Here are the two proofs for different leaves:
 
 ![](docs/proof4.svg)
 
@@ -381,6 +381,33 @@ So, after taking these observations into account, we see that if we are sending 
 
 
 
+### Strands
+
+There are a variety of ways that proofs for multiple values can be encoded. Quadrable uses a method with "strands". I'm not sure if it is the best way, but it seems to create fairly compact proofs. Furthermore, it can be processed with a single pass over the proof data, can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will have constructed a ready-to-use partial-tree.
+
+Each strand is related to a record whose value is to be proven, and consists of the following:
+
+* Hash of the key, or (optionally) the key itself
+* Depth
+* Record type
+  * Leaf: A regular leaf value, suitable for satisfying a get or update request
+  * WitnessLeaf: A leaf value, suitable for proving non-inclusion
+  * Witness: An unspecified node, suitable for proving non-inclusion
+* Value, the contents of which depends on the record type:
+  * Leaf: The leaf value (ie the result of a get query)
+  * WitnessLeaf: The hash of the leaf value (allows to prover to create the nodeHash)
+  * Witness: Unused
+
+A Quadrable proof consists of:
+
+* A list of strands, sorted by the hashes of their keys
+* A list of commands, which are instructions on how to start processing the strands
+
+![](docs/strands1.svg)
+
+
+
+Quadrable has a conceptual separation between a proof and the encoding of a proof, so there can in theory be many ways to encode a proof for multiple values. However, so far we have only implemented a
 
 FIXME: strand in a non-inclusion, can avoid creating altogether
 
@@ -390,7 +417,7 @@ FIXME: strand in a non-inclusion, can avoid creating altogether
 
 ### LMDB
 
-Because traversing Quadrable's tree data-structure requires reading many small records, and these reads cannot be parallelized or pipelined, it is very important to be able to read records quickly and efficiently.
+Because traversing Quadrable's tree data-structure requires reading many small records, and these reads cannot be parallelised or pipelined, it is very important to be able to read records quickly and efficiently.
 
 Quadrable uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
 
