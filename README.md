@@ -360,7 +360,7 @@ Now you need to compute the next parent's hash, which requires another witness. 
 * The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we can trust the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
 
 
-### Sub-tree proofs
+### Proofs for multiple values
 
 The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes. Since the prover has the value to be proven, and knows the path (it's the hash of the key), it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root.
 
@@ -377,7 +377,7 @@ By the way, consider the degenerate case of creating a proof for *all* the leave
 
 So, after taking these observations into account, we see that if we are sending a combined proof for these two leaves, we actually only need to send 4 witnesses:
 
-![](docs/proof4.svg)
+![](docs/proof5.svg)
 
 
 
