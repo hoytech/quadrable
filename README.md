@@ -312,7 +312,7 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 In the diagrams above it shows nodes in the tree being modified during an update. This makes it easier to explain what is happening, but is not actually how the data structure is implemented (sorry about that!). To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
 
-In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the splitting leaves section above (FIXME link), but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted line):
+In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the splitting leaves section above (FIXME link), but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted lines):
 
 ![](docs/cow.svg)
 
@@ -435,22 +435,78 @@ After processing all commands, implementations should check the following:
 
 ### Proof encodings
 
-There are a variety of ways that proofs could be encoded (whether using the strands model or otherwise). Quadrable has a conceptual separation between a proof and its encoding. At the C++ level there is a `quadrable::Proof` class, and it contains an abstract definition of the proof.
-
-In order to serialize this to something that can be transmitted, there is an `encodeProof()` function. It takes two arguments: The proof to encode and the encoding type. So far we have only implemented the following encoding types:
+There are a variety of ways that proofs could be encoded (whether using the strands model or otherwise). Quadrable has a conceptual separation between a proof and its encoding. At the C++ level there is a `quadrable::Proof` class, and it contains an abstract definition of the proof. In order to serialize this to something that can be transmitted, there is an `encodeProof()` function. It takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
 * `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible.
 * `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports enumeration by key.
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parens above.
 
-Since the two encoding types are so similar, I will describe them concurrently and point out the minor differences as they arise.
+Although the C++ implementation has an intermediate representation of a decoded proof, other implementations may choose to directly process the encoded form.
+
+Since the two encoding types implemented so far are so similar, I will describe them concurrently and point out the minor differences as they arise.
+
+If small proof size is important, an encoding-time optimizer can do extra work to minimize the number of commands required, which reduces the proof size.
 
 
 
 ### Compact encoding
 
+The first byte is the version byte described above, and then strands and commands are serialized in order:
 
+    [1 byte proof type]
+    [ProofStrand]+
+    [ProofCmd]+
+
+* The sort order is signifcant for both. For strands it must be sorted by key hash (even if keys are included, and not the keyHashes). For commands the order is the sequence that the commands will be processed.
+* At the end of the lists of strands, a special "Invalid" strand (with a strand type of 0) signifys the end of the strand list and that the commands follow.
+* The commands are just processed until the end of the encoded string.
+
+Here is how each strand is encoded:
+
+    [1 byte strand type, Invalid means end of strands]
+    [1 byte depth]
+    if Leaf
+      if CompactNoKeys:
+        [32 byte keyHash]
+      else if CompactWithKeys:
+        [varint size of key]
+        [N-byte key]
+      [varint size of val]
+      [N-byte val]
+    else if WitnessLeaf
+      [32 byte keyHash]
+      [32 byte valHash]
+    else if WitnessEmpty
+      [32 byte keyHash]
+
+* A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is a base 128 with most significant digit first and the fewest possible digits and with the most significant bit set on all but the last digit.
+* The strand types are as follows:
+  * `0`: Invalid
+  * `1`: Leaf
+  * `2`: WitnessLeaf
+  * `3`: WitnessEmpty
+
+The encoded commands are 1 byte each, and they do not correspond exactly with the commands described previously, although there is a straightforward conversion between the two. Here are the commands:
+
+           hashing: 0[7 bits hashing details, all 0 == merge]
+    short jump fwd: 100[5 bits distance]   jumps d+1, range: 1 to 32
+    short jump rev: 101[5 bits distance]   jumps -(d+1) range: -1 to -32
+     long jump fwd: 110[5 bits distance]   jumps 2^(d+6) range: 64, 128, 256, 512, ..., 2^37
+     long jump rev: 111[5 bits distance]   jumps -2^(d+6) range: -64, -128, -256, -512, ..., -2^37
+
+The hashing details are 7 bits that indicate a sequence of either hashing with a provided witness value or an empty sub-tree (32 zero bytes).
+
+* Only up-to 6 of the bits can actually be used. Bits are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are used (`0` means empty and `1` means provided witness). This way between 1 and 6 hashes can be applied per hashing byte.
+* The witnesses are provided inline, that is they are 32 bytes directly after the command byte. These bytes are then skipped over and the next command is the following byte.
+* If all 7 bits in the hashing details are `0` (there is no marker bit) then the command says to merge this strand with the next unmerged strand (which can be found via the `next` linked list)
+
+The decoding algorithm must keep an index into the strands. This is the current "working strand". The jump commands change this so that subsequent hashing commands will work on other strands.
+
+* The initial working strand is the *last* strand. This is arbitrary, but usually the strands are worked on starting at the right, because merging happens into the left strands
+* The short jumps simply add one to the 5 bit distance and add or subtract this from the working strand
+* The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows an implementation to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then it can use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte is 1 command" model, and doesn't allow representation of zero-length jumps
+* Implementations should check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap" around, which could allow some clever encoding-time optimizations, especially if the number of strands is relatively prime with 2, but the added complexity didn't seem worth it.
 
 
 
