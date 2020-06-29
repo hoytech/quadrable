@@ -30,47 +30,6 @@ std::string varInt(uint64_t n) {
 
 
 
-/*
-
-Proof encoding:
-
-[1 byte proof type]
-[ProofStrand]+
-[ProofCmd]+
-
-
-ProofStrand:
-
-[1 byte strand type, Invalid means end of strands]
-[1 byte depth]
-if Leaf
-  if CompactNoKeys:
-    [32 byte keyHash]
-  else if CompactWithKeys:
-    [varint size of key]
-    [N-byte key]
-  [varint size of val]
-  [N-byte val]
-else if WitnessLeaf
-  [32 byte keyHash]
-  [32 byte valHash]
-else if WitnessEmpty
-  [32 byte keyHash]
-
-
-
-ProofCmd:
-
-       hashing: 0[7 bits hashing details, all 0 == merge]
-short jump fwd: 100[5 bits distance]   jumps d+1, range: 1 to 32
-short jump rev: 101[5 bits distance]   jumps -(d+1) range: -1 to -32
- long jump fwd: 110[5 bits distance]   jumps 2^(d+6) range: 64, 128, 256, 512, ..., 2^37
- long jump rev: 111[5 bits distance]   jumps -2^(d+6) range: -64, -128, -256, -512, ..., -2^37
-
-*/
-
-
-
 
 enum class EncodingType {
     CompactNoKeys = 0,
@@ -85,7 +44,7 @@ static inline std::string encodeProof(const Proof &p, EncodingType encodingType 
 
     o += static_cast<unsigned char>(encodingType);
 
-    // Elements
+    // Strands
 
     for (auto &strand : p.strands) {
         o += static_cast<unsigned char>(strand.strandType);
@@ -224,7 +183,7 @@ static inline Proof decodeProof(std::string_view encoded) {
         throw quaderr("unexpected proof encoding type: ", (int)encodingType);
     }
 
-    // Elements
+    // Strands
 
     while (1) {
         auto strandType = static_cast<ProofStrand::Type>(getByte());
