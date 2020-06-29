@@ -31,6 +31,7 @@ R"(
       quadb [options] stats
       quadb [options] status
       quadb [options] diff <head> [--sep=<sep>]
+      quadb [options] patch [--sep=<sep>]
       quadb [options] head
       quadb [options] head rm [<head>]
       quadb [options] checkout [<head>]
@@ -299,11 +300,37 @@ void run(int argc, char **argv) {
             if (delta.deletion) std::cout << "-";
             else std::cout << "+";
 
-            std::cout << delta.key.size() ? delta.key : quadrable::renderUnknown(delta.keyHash);
-            std::cout << sep << delta.val << "\n";
+            std::cout << (delta.key.size() ? delta.key : quadrable::renderUnknown(delta.keyHash));
+            std::cout << sep;
+            std::cout << delta.val << "\n";
         }
 
         std::cout << std::flush;
+    } else if (args["patch"].asBool()) {
+        std::string sep = ",";
+        if (args["--sep"]) sep = args["--sep"].asString();
+
+        auto changes = db.change();
+
+        std::string origLine;
+        while (std::getline(std::cin, origLine)) {
+            if (origLine.size() < 1) throw quaderr("empty line in patch");
+            if (origLine[0] == '#') continue;
+
+            std::string_view line(origLine.data() + 1, origLine.size() - 1);
+
+            size_t delimOffset = line.find(sep);
+            if (delimOffset == std::string::npos) throw quaderr("couldn't find separator in input line");
+
+            auto k = line.substr(0, delimOffset);
+            auto v = line.substr(delimOffset + sep.size());
+
+            if (origLine[0] == '+') changes.put(k, v);
+            else if (origLine[0] == '-') changes.del(k);
+            else throw quaderr("unexpected line in patch");
+        }
+
+        changes.apply(txn);
     } else if (args["gc"].asBool()) {
         quadrable::Quadrable::GarbageCollector gc(db);
 
