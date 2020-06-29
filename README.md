@@ -381,11 +381,26 @@ So, after taking these observations into account, we see that if we are sending 
 
 
 
+### Proof encodings
+
+There are a variety of ways that proofs for multiple values can be encoded. Quadrable has a conceptual separation between a proof and the encoding of a proof, so there can in theory be many ways to encode a proof for multiple values. At the C++ level there is a `quadrable::Proof` class, and it contains an abstract definition of the proof.
+
+In order to serialize this to something that can be transmitted, there is an `encodeProof()` function. It takes two arguments: The proof to encode and the encoding type. So far we have only implemented the following encoding types:
+
+* `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible.
+* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports enumeration by key.
+
+Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parens above.
+
+
+
 ### Strands
 
-There are a variety of ways that proofs for multiple values can be encoded. Quadrable uses a method with "strands". I'm not sure if it is the best way, but it seems to create fairly compact proofs. Furthermore, it can be processed with a single pass over the proof data, can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will have constructed a ready-to-use partial-tree.
+Quadrable has a notion of "strands". I'm not sure if this is the best way to reason about it, but it seems to create fairly compact proofs. Furthermore, it can be processed with a single pass over the proof data (although practically it's easier to have 2 passes: a setup pass and a processing pass), can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will have constructed a ready-to-use partial-tree.
 
-Each strand is related to a record whose value is to be proven, and consists of the following:
+Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than values requested to be proven. This can happen when, while processing a strand, an empty sub-tree is revealed and this is sufficient for satisfying a requested non-inclusion proof.
+
+A Quadrable proof includes a list of strands, *sorted by the hashes of their keys*. Each strand contains the following:
 
 * Hash of the key, or (optionally) the key itself
 * Depth
@@ -398,18 +413,37 @@ Each strand is related to a record whose value is to be proven, and consists of 
   * WitnessLeaf: The hash of the leaf value (allows to prover to create the nodeHash)
   * Witness: Unused
 
-A Quadrable proof consists of:
+The first thing the verifier should do is run some initial setup on each strand:
 
-* A list of strands, sorted by the hashes of their keys
-* A list of commands, which are instructions on how to start processing the strands
+* Hash the key (if key was included)
+* Compute the nodeHash (if node type was Leaf or WitnessLeaf). This is now called the strand's nodeHash
+* Set a `next` index value to `i+1`, where `i` is the node's index in the list. This functions as a singly-linked list
+* Set a `merged` boolean value to `false`
+
+### Commands
+
+In addition to the list of strands, a Quadrable proof includes a list of commands. These are instructions on how to process the strands. After running all the commands, then the root will be reconstructed and the proof verified (hopefully).
 
 ![](docs/strands1.svg)
 
+Every command specifies a strand by its index in the strand list. After running a command this strand's depth will decrease by 1.
+
+There are 3 commands:
+
+* `HashProvided`: Take the provided witness, concatenate it with the specified strand's nodeHash, and hash, storing the result into this strand's nodeHash. The order of concatenation depends on the `depth` bit of the strand's keyHash.
+* `HashEmpty`: The same as the previous, but there is no provided witness. Instead, the empty sub-tree nodeHash (32 zero bytes) is used.
+* `Merge`: Take this strand's nodeHash and concatenate and hash it with the nodeHash of the next un-merged strand in the strand list, which can be found by looking at the `next` linked list. Set the `next` strand to merged and unlink it from the linked list.
+  * Implementations should check if `merged` is true and fail prior to merging, although this isn't strictly necessary from a security standpoint.
+
+While processing commands, implementations should be creating nodes along the way. They can keep references to each child and put these references into the parent node when it is created, allowing efficient traversal of the tree (although there are several ways to accomplish this). This way, updates can be performed on the partial-tree.
+
+After processing all commands, implementations should check the following:
+
+* The first strand has an empty `next` linked list, meaning all strands have merged into the left-most strand
+* The first strand has a depth of 0, meaning it is the putative root node
+* The first strand's nodeHash is equal to the trusted root
 
 
-Quadrable has a conceptual separation between a proof and the encoding of a proof, so there can in theory be many ways to encode a proof for multiple values. However, so far we have only implemented a
-
-FIXME: strand in a non-inclusion, can avoid creating altogether
 
 
 
@@ -421,7 +455,7 @@ Because traversing Quadrable's tree data-structure requires reading many small r
 
 Quadrable uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
 
-LMDB is a B-tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB that are commonly used for merkle tree storage. Compared to LevelDB, LMDB has radically better read performance and uses the CPU more efficiently. It has instant recovery after a crash, doesn't suffer from write amplification, offers ACID transactions and multi-process concurrency (in addition to multi-thread), and is less likely to suffer data corruption.
+LMDB is a B-tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB that are commonly used for merkle tree storage. Compared to LevelDB, LMDB has radically better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers ACID transactions and multi-process concurrency (in addition to multi-thread), and is less likely to suffer data corruption.
 
 ### nodeId
 
