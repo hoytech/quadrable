@@ -82,7 +82,7 @@ Unless the value was the same as a previously existing one, the current head wil
 
     $ quadb status
     Head: master
-    Root: 0x7b46238caa66f0646e29cec43dab1d010001e7cac6ee3371363b90a31e6c34bd (1)
+    Root: 0x0b84df4f4677733fe0956d3e4853868f54a64d0f86ecfcb3712c18e29bd8249c (1)
 
 ### quadb get
 
@@ -155,7 +155,7 @@ This new head will not appear in the `quadb head` list until we have completed a
 
     $ quadb put tempKey tempVal
     $ quadb head
-    => temp : 0x11bf4b644c4ad1c9e18a96c1f35cdd161941d2355742aaa3577dcefef0382a16 (2)
+    => temp : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
        master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
 The `tempKey` record that we just inserted only exists in the `temp` head, and if we checkout back to master it would not be visible there.
@@ -168,8 +168,8 @@ When we created a new head with checkout, it was initialised to an empty tree. I
 
     $ quadb fork temp2
     $ ./quadb head
-       temp : 0x11bf4b644c4ad1c9e18a96c1f35cdd161941d2355742aaa3577dcefef0382a16 (2)
-    => temp2 : 0x11bf4b644c4ad1c9e18a96c1f35cdd161941d2355742aaa3577dcefef0382a16 (2)
+       temp : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
+    => temp2 : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
        master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
 Our new `temp2` head starts off with the same root as `temp`. We can now modify `temp2` and it will not affect the `temp` tree.
@@ -180,7 +180,32 @@ Although semantically `quadb fork` acts like it copies the tree pointed to by th
 
 ### quadb diff
 
-FIXME
+You can view the differences between the head you have checked out and another branch with `quadb diff`. If the heads are equivalent, there will be no output:
+
+    $ quadb diff temp
+    $
+
+Let's add a new key and delete an existing one from our current branch:
+
+    $ quadb put new test
+    $ quadb del tempKey
+
+Now the diff shows one line per modification. If the modification was an insertion or update, the the first character will be `+` and the key/value will be the new value to be set. If it was a deletion, the first character will be `-` and the key/value will be the old value that has been removed.
+
+    $ quadb diff temp
+    -tempKey,tempVal
+    +new,test
+
+* You can change the separator using the `--sep` option, just as with `import`/`export`.
+* If two trees have been forked from one another recently, then diffs will be very fast. This is because the algorithm will detect shared portions of the tree and not bother diffing them. Diffing two trees that don't share structure (for example, if they were separately `import`ed from the same data) will still work, but will run slower. In the future we may implement a `dedup` command that uses `diff` to detect equal but unshared structure and make them shared.
+
+### quadb patch
+
+This command accepts a diff on standard input, and applies it to the current head.
+
+* The format is the same as printed by `diff`
+* Lines that start with `#` are treated as comments and are ignored
+* The separator argument `--sep` must match what was used in the `diff` invocation
 
 ### quadb exportProof
 
@@ -480,7 +505,7 @@ Here is how each strand is encoded:
     else if WitnessEmpty
       [32 byte keyHash]
 
-* A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is a base 128 with most significant digit first and the fewest possible digits and with the most significant bit set on all but the last digit.
+* A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is in base 128 with the most significant digit first using the fewest possible digits, and with the most significant bit set on all but the last digit.
 * The strand types are as follows:
   * `0`: Invalid
   * `1`: Leaf
@@ -497,7 +522,7 @@ The encoded commands are 1 byte each, and they do not correspond exactly with th
 
 The hashing details are 7 bits that indicate a sequence of either hashing with a provided witness value or an empty sub-tree (32 zero bytes).
 
-* Only up-to 6 of the bits can actually be used. Bits are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are used (`0` means empty and `1` means provided witness). This way between 1 and 6 hashes can be applied per hashing byte.
+* Only up-to 6 of the bits can actually be used for hashing directives. Bits are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are used (`0` means empty and `1` means provided witness). This way between 1 and 6 hashes can be applied per hashing byte.
 * The witnesses are provided inline, that is they are 32 bytes directly after the command byte. These bytes are then skipped over and the next command is the following byte.
 * If all 7 bits in the hashing details are `0` (there is no marker bit) then the command says to merge this strand with the next unmerged strand (which can be found via the `next` linked list)
 
