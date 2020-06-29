@@ -351,6 +351,14 @@ However, to compute the parent node's hash you need to know the hash of the leaf
 
 ![](docs/proof2.svg)
 
+Now you need to compute the next parent's hash, which requires another witness. This continues on up the tree until you reach the top:
+
+![](docs/proof3.svg)
+
+* Whether the witness is the left child or the right child depends on the value of the path at that level. If it is a `1` then the witness is on the left, since the value is stored underneath the right node (and vice versa). You can think of a witness as a sub-tree that you don't care about, so you are just getting a summarized value that covers all of the nodes underneath that portion of the tree.
+* There is a witness for every level of the tree. Since Quadrable uses collapsed leafs, this will be less than the full size of the hash. If we can assume hashes are randomly distributed, then this will be roughly log2(N): If there are a million items in the DB, there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in depth is the beauty of trees and logarithmic growth).
+* The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we can trust the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions for our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
+
 
 
 
