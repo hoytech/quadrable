@@ -147,8 +147,8 @@
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
      inkscape:zoom="2"
-     inkscape:cx="436.05579"
-     inkscape:cy="170.28893"
+     inkscape:cx="463.13443"
+     inkscape:cy="105.28893"
      inkscape:document-units="mm"
      inkscape:current-layer="layer1"
      showgrid="false"
@@ -169,7 +169,7 @@
         <dc:format>image/svg+xml</dc:format>
         <dc:type
            rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-        <dc:title></dc:title>
+        <dc:title />
       </cc:Work>
     </rdf:RDF>
   </metadata>
@@ -520,12 +520,6 @@
        cx="251.06273"
        cy="63.366245"
        r="1.0949726" />
-    <circle
-       style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:0.53562772;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
-       id="path2131-0-2-0-7-4-5-1"
-       cx="198.99443"
-       cy="21.413361"
-       r="1.1134999" />
     <path
        style="fill:none;stroke:#000000;stroke-width:0.14171818px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
        d="m 172.16242,34.355081 26.0336,-12.446025"
@@ -573,12 +567,6 @@
        cx="310.73029"
        cy="64.10865"
        r="1.0949726" />
-    <circle
-       style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:0.53562772;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
-       id="path2131-0-2-0-7-4-5-1-3-3"
-       cx="286.07501"
-       cy="22.183252"
-       r="1.1135" />
     <path
        style="fill:none;stroke:#000000;stroke-width:0.14171818px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
        d="M 313.19739,35.094834 287.16381,22.648806"
@@ -652,5 +640,17 @@
        cx="219.84035"
        cy="53.484093"
        r="1.1135" />
+    <circle
+       style="fill:#008000;fill-opacity:1;stroke:#008000;stroke-width:0.53562772;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+       id="path2131-0-2-0-7-4-5-1"
+       cx="199.07587"
+       cy="21.607395"
+       r="1.1135" />
+    <circle
+       style="fill:#008000;fill-opacity:1;stroke:#008000;stroke-width:0.53562772;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+       id="path2131-0-2-0-7-4-5-1-3-3"
+       cx="286.15646"
+       cy="22.377287"
+       r="1.1135001" />
   </g>
 </svg>

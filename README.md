@@ -356,9 +356,33 @@ Now you need to compute the next parent's hash, which requires another witness. 
 ![](docs/proof3.svg)
 
 * Whether the witness is the left child or the right child depends on the value of the path at that level. If it is a `1` then the witness is on the left, since the value is stored underneath the right node (and vice versa). You can think of a witness as a sub-tree that you don't care about, so you are just getting a summarized value that covers all of the nodes underneath that portion of the tree.
-* There is a witness for every level of the tree. Since Quadrable uses collapsed leafs, this will be less than the full size of the hash. If we can assume hashes are randomly distributed, then this will be roughly log2(N): If there are a million items in the DB, there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in depth is the beauty of trees and logarithmic growth).
-* The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we can trust the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions for our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
+* There is a witness for every level of the tree. Since Quadrable uses collapsed leaves, this will be less than the full size of the hash. If we can assume hashes are randomly distributed, then this will be roughly log2(N): That is, if there are a million items in the DB there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in depth is the beauty of trees and logarithmic growth).
+* The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we can trust the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
 
+
+### Sub-tree proofs
+
+The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes. Since the prover has the value to be proven, and knows the path (it's the hash of the key), it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root.
+
+This is pretty much as good as you can do with the proof for a single leaf (except perhaps indicate empty sub-trees somehow so you don't need to send them along with the proof -- see below). However, let's suppose we want to prove multiple values at the same time. Here are the two proofs for different leaves:
+
+![](docs/proof4.svg)
+
+To prove both of these values independently, we would need to send 8 witnesses in total. However, if we are proving both together, there are some observations we should make:
+
+* Since we are authenticating values from the same tree, the top 2 witnesses will be the same, and are therefore redundant. We should try to not include the same witness multiple times in a proof.
+* On the third level, the node that was sent as a witness in one proof is a computed node in the other proof, and vice versa. Since the verifier is going to be computing this value anyway, there is no need to send any witnesses for this level.
+
+By the way, consider the degenerate case of creating a proof for *all* the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways.
+
+So, after taking these observations into account, we see that if we are sending a combined proof for these two leaves, we actually only need to send 4 witnesses:
+
+![](docs/proof4.svg)
+
+
+
+
+FIXME: strand in a non-inclusion, can avoid creating altogether
 
 
 
