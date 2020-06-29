@@ -420,7 +420,7 @@ The first method is to present a branch where the corresponding child node is oc
 
 The second method is to present a leaf node that is on the corresponding path, but has a different key hash. This conflicting leaf is called a "witness leaf":
 
-![](docs/non-inclusion-empty.svg)
+![](docs/non-inclusion-witnessleaf.svg)
 
 Both of these methods are proved just like inclusion proofs: There is an untrusted value that will be hashed and then combined with witnesses up the tree until a candidate root node is reached. If this candidate root matches the trusted root then the non-inclusion proof is satisifed.
 
