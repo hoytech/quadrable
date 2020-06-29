@@ -35,6 +35,17 @@ Clone the repo, `cd` into it, and run these commands:
     git submodule update --init
     make -j
 
+### Tests
+
+You can run the tests like so:
+
+    make test
+
+You can view a coverage report by running:
+
+    make coverage
+
+You will need `lcov` installed. The report will be in this file: `quadrable/coverage-report/index.html`
 
 
 ## Command-line
@@ -424,14 +435,14 @@ The second method is to present a leaf node that is on the corresponding path, b
 
 Both of these methods are proved just like inclusion proofs: There is an untrusted value that will be hashed and then combined with witnesses up the tree until a candidate root node is reached. If this candidate root matches the trusted root then the non-inclusion proof is satisifed.
 
-Witness leafs are just like regular proof-of-inclusion leafs, except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value, they merely wish to prove that it is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible that a leaf will be used for a non-inclusion instead of a witness leaf in a combined proof. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
+Witness leaves are just like regular proof-of-inclusion leaves, except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value (which may be quite large): They merely wish to prove that it is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible for a leaf to be used for a non-inclusion instead of a witness leaf. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
 
 
 
 
 ### Strands
 
-Quadrable has a notion of "strands". I'm not sure if this is the best way to reason about it, but it seems to create fairly compact proofs. Furthermore, it can be processed with a single pass over the proof data (although practically it's easier to have 2 passes: a setup pass and a processing pass), can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will have constructed a ready-to-use partial-tree.
+Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data (although practically it's easier to have 2 passes: a setup pass and a processing pass). They can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will result in a ready-to-use partial-tree.
 
 Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than values requested to be proven. This can happen when, while processing a strand, an empty sub-tree is revealed and this is sufficient for satisfying a requested non-inclusion proof.
 
@@ -467,16 +478,19 @@ There are 3 types of commands ("ops"):
 
 * `HashProvided`: Take the provided witness, concatenate it with the specified strand's nodeHash, and hash, storing the result into this strand's nodeHash. The order of concatenation depends on the `depth` bit of the strand's keyHash.
 * `HashEmpty`: The same as the previous, but there is no provided witness. Instead, the empty sub-tree nodeHash (32 zero bytes) is used.
-* `Merge`: Take this strand's nodeHash and concatenate and hash it with the nodeHash of the next un-merged strand in the strand list, which can be found by looking at the `next` linked list. Set the `next` strand to merged and unlink it from the linked list.
-  * Implementations should check if `merged` is true and fail prior to merging, although this isn't strictly necessary from a security standpoint.
-
-While processing commands, implementations should be creating nodes along the way. They can keep references to each child and put these references into the parent node when it is created, allowing efficient traversal of the tree (although there are several ways to accomplish this). This way, updates can be performed on the partial-tree.
+* `Merge`: Take this strand's nodeHash and concatenate and hash it with the nodeHash of the next un-merged strand in the strand list, which can be found by looking at the `next` linked list.
+  * Implementations should check that the `merged` flag is false in the `next` strand, and that both strands are at the same depth.
+  * After the merge, the `next` strand should have `merged` set to true, and should be unlinked from the linked list.
 
 After processing all commands, implementations should check the following:
 
 * The first strand has an empty `next` linked list, meaning all strands have merged into the left-most strand
 * The first strand has a depth of 0, meaning it is the candidate root node
 * The first strand's nodeHash is equal to the trusted root
+
+While processing commands, implementations should be creating nodes along the way for later querying. Technically, this is optional and an implementation could just verify the root hash and then rely on the initial strand values. However, it is easier to make security-related mistakes with this approach. For example, suppose an implementation forgot to check the first strand had an empty `next` linked list after processing. In this case, an unauthenticated value could be in the initial strands that was never merged into the root. The tree-construction method "fails safe" in the presence of this mistake (among others) since this unauthenticated value will never have been added to the created tree used for querying.
+
+Furthermore, a tree structure will be required in order to compute a new root after making modifications to these values, so in this case you may as well create a partial-tree while processing the proof. And if you support building a partial-tree like this, any other handling of the strand values is duplicated code, which should be avoided.
 
 
 
@@ -487,11 +501,9 @@ There are a variety of ways that proofs could be encoded (whether using the stra
 * `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible.
 * `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports enumeration by key.
 
-Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parens above.
+Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parens above. Since the two encoding types implemented so far are similar, I will describe them concurrently and point out the minor differences as they arise.
 
 Although the C++ implementation has an intermediate representation of a decoded proof, other implementations may choose to directly process the encoded form.
-
-Since the two encoding types implemented so far are so similar, I will describe them concurrently and point out the minor differences as they arise.
 
 If small proof size is important, an encoding-time optimizer can do extra work to minimize the number of commands required, which reduces the proof size.
 
@@ -503,10 +515,10 @@ The first byte is the version byte described above, and then strands and command
 
     [1 byte proof type]
     [ProofStrand]+
-    [ProofCmd]+
+    [ProofCmd]*
 
-* The sort order is signifcant for both. For strands it must be sorted by key hash (even if keys are included, and not the keyHashes). For commands the order is the sequence that the commands will be processed.
-* At the end of the lists of strands, a special "Invalid" strand (with a strand type of 0) signifys the end of the strand list and that the commands follow.
+* The sort order is significant for both. For strands it must be sorted by key hash (even if keys are included, and not the keyHashes). For commands the order is the sequence that the commands will be processed.
+* At the end of the lists of strands, a special "Invalid" strand signifies the end of the strand list, and that the commands follow.
 * The commands are just processed until the end of the encoded string.
 
 Here is how each strand is encoded:
@@ -529,10 +541,10 @@ Here is how each strand is encoded:
 
 * A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is in base 128 with the most significant digit first using the fewest possible digits, and with the most significant bit set on all but the last digit.
 * The strand types are as follows:
-  * `0`: Invalid
-  * `1`: Leaf
-  * `2`: WitnessLeaf
-  * `3`: WitnessEmpty
+  * `0`: Leaf (chosen to be 0 since this is probably the most common, and 0 bytes are cheaper in Ethereum calldata)
+  * `1`: WitnessLeaf
+  * `2`: WitnessEmpty
+  * `15`: Invalid
 
 The encoded commands are 1 byte each, and they do not correspond exactly with the commands described previously, although there is a straightforward conversion between the two. Here are the commands:
 
@@ -544,15 +556,15 @@ The encoded commands are 1 byte each, and they do not correspond exactly with th
 
 The hashing details are 7 bits that indicate a sequence of either hashing with a provided witness value or an empty sub-tree (32 zero bytes).
 
-* Only up-to 6 of the bits can actually be used for hashing directives. Bits are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are used (`0` means empty and `1` means provided witness). This way between 1 and 6 hashes can be applied per hashing byte.
-* The witnesses are provided inline, that is they are 32 bytes directly after the command byte. These bytes are then skipped over and the next command is the following byte.
+* Only 6 or fewer of the bits can actually be used for hashing directives. These bytes are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are used (`0` means empty and `1` means provided witness). This way between 1 and 6 hashes can be applied per hashing byte.
+* The witnesses are provided inline, that is they are the 32 bytes directly after the command byte. These 32 bytes are then skipped over and the next command is the following byte.
 * If all 7 bits in the hashing details are `0` (there is no marker bit) then the command says to merge this strand with the next unmerged strand (which can be found via the `next` linked list)
 
-The decoding algorithm must keep an index into the strands. This is the current "working strand". The jump commands change this so that subsequent hashing commands will work on other strands.
+The decoding algorithm must keep an index into the strands. This is the current "working strand". The jump commands alter this index, so that subsequent hashing commands can work on other strands.
 
-* The initial working strand is the *last* strand. This is arbitrary, but usually the strands are worked on starting at the right, because merging happens into the left strands
+* The initial working strand is the *last* (right-most) strand. This was an arbitrary choice, but usually the strands are worked on starting at the right, because left strands survive longer (the left-most one always becomes the final strand).
 * The short jumps simply add one to the 5 bit distance and add or subtract this from the working strand
-* The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows an implementation to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then it can use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte is 1 command" model, and doesn't allow representation of zero-length jumps
+* The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows an implementation to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which don't make sense)
 * Implementations should check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap" around, which could allow some clever encoding-time optimizations, especially if the number of strands is relatively prime with 2, but the added complexity didn't seem worth it.
 
 
