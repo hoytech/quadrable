@@ -148,10 +148,10 @@ using GetMultiQuery = std::map<std::string, GetMultiResult>;
 
 struct ProofStrand {
     enum class Type {
-        Invalid = 0,
-        Leaf = 1,
-        WitnessLeaf = 2,
-        WitnessEmpty = 3,
+        Leaf = 0,
+        WitnessLeaf = 1,
+        WitnessEmpty = 2,
+        Invalid = 15,
     } strandType;
     uint64_t depth;
     std::string keyHash;
