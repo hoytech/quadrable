@@ -446,7 +446,7 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data (although practically it's easier to have 2 passes: a setup pass and a processing pass). They can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will result in a ready-to-use partial-tree.
 
-Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than values requested to be proven. This can happen when, while processing a strand, an empty sub-tree is revealed and this is sufficient for satisfying a requested non-inclusion proof.
+Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than values requested to be proven. This can happen when, while processing a strand, a witness reveals an empty sub-tree and this is sufficient for satisfying a requested non-inclusion proof.
 
 A Quadrable proof includes a list of strands, *sorted by the hashes of their keys*. Each strand contains the following:
 
@@ -470,7 +470,7 @@ The first thing the verifier should do is run some initial setup on each strand:
 
 ### Commands
 
-In addition to the list of strands, a Quadrable proof includes a list of commands. These are instructions on how to process the strands. After running all the commands, then the root will be reconstructed and the proof verified (hopefully).
+In addition to the list of strands, a Quadrable proof includes a list of commands. These are instructions on how to process the strands. After running all the commands the root will be reconstructed and (assuming it matches the trusted root) the proof is verified.
 
 Every command specifies a strand by its index in the strand list. After running a command this strand's depth will decrease by 1.
 
@@ -488,7 +488,7 @@ After processing all commands, implementations should check the following:
 * The first strand has a depth of 0, meaning it is the candidate root node
 * The first strand's nodeHash is equal to the trusted root
 
-While processing commands, implementations should be creating nodes along the way for later querying. Technically, this is optional and an implementation could just verify the root hash and then rely on the initial strand values. However, it is easier to make security-related mistakes with this approach. For example, suppose an implementation forgot to check the first strand had an empty `next` linked list after processing. In this case, an unauthenticated value could be in the initial strands that was never merged into the root. The tree-construction method "fails safe" in the presence of this mistake (among others) since this unauthenticated value will never have been added to the created tree used for querying.
+While processing commands, implementations should be creating nodes along the way for later querying. Technically, this is optional and an implementation could just verify the root hash and then rely on the initial strand values. However, it is easier to make security-related mistakes with this approach. For example, suppose an implementation forgot to check the first strand had an empty `next` linked list after processing. In this case, an unauthenticated value could be in the initial strands that was never merged into the root. The tree-construction method "fails safe" in the presence of this mistake (among others) since this unauthenticated value will never get added to the created tree used for querying.
 
 Furthermore, a tree structure will be required in order to compute a new root after making modifications to these values, so in this case you may as well create a partial-tree while processing the proof. And if you support building a partial-tree like this, any other handling of the strand values is duplicated code, which should be avoided.
 
@@ -578,6 +578,8 @@ Because traversing Quadrable's tree data-structure requires reading many small r
 Quadrable uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
 
 LMDB is a B-tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB that are commonly used for merkle tree storage. Compared to LevelDB, LMDB has radically better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers ACID transactions and multi-process concurrency (in addition to multi-thread), and is less likely to suffer data corruption.
+
+LMDB supports multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a single transaction), and because our nodes are more granular than LMDB's B-tree pages.
 
 ### nodeId
 
