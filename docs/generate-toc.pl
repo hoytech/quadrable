@@ -15,9 +15,13 @@ my $seenHeaders = {};
         $lines .= $_;
 
         if (/^[#]+ (.*)/) {
-            die "duplicate header: $1" if $seenHeaders->{$1};
-            $seenHeaders->{$1}++;
-            push @$headers, $&;
+            my $whole = $&;
+            my $title = $1;
+
+            my $link = title2link($1);
+            die "duplicate header: $link" if $seenHeaders->{$link};
+            $seenHeaders->{$link}++;
+            push @$headers, $whole;
         }
     }
 }
@@ -34,8 +38,7 @@ for my $header (@$headers) {
     $prefix =~ s/#/  /g;
     $prefix = "$prefix*";
 
-    my $link = lc $title;
-    $link =~ s/\s+/-/g;
+    my $link = title2link($title);
     $toc .= "$prefix [$title](#$link)\n";
 }
 
@@ -47,4 +50,21 @@ for my $header (@$headers) {
     print $ofh $lines;
 }
 
+
+while ($lines =~ m{\[.*?\][(]#(.*?)[)]}g) {
+    my $link = $1;
+    if (!$seenHeaders->{$link}) {
+        print STDERR "WARNING: Unresolved link: $link\n";
+    }
+}
+
 system("mv -f README.md.tmp README.md");
+
+
+
+sub title2link {
+    my $title = shift;
+    my $link = lc $title;
+    $link =~ s/\s+/-/g;
+    return $link;
+}

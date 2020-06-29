@@ -7,23 +7,7 @@
   * [Dependencies](#dependencies)
   * [Compilation](#compilation)
   * [Tests](#tests)
-* [Command-line](#command-line)
-  * [quadb init](#quadb-init)
-  * [quadb status](#quadb-status)
-  * [quadb put](#quadb-put)
-  * [quadb get](#quadb-get)
-  * [quadb del](#quadb-del)
-  * [quadb import](#quadb-import)
-  * [quadb export](#quadb-export)
-  * [quadb head](#quadb-head)
-  * [quadb checkout](#quadb-checkout)
-  * [quadb fork](#quadb-fork)
-  * [quadb diff](#quadb-diff)
-  * [quadb patch](#quadb-patch)
-  * [quadb exportProof](#quadb-exportproof)
-  * [quadb importProof](#quadb-importproof)
-  * [quadb mergeProof](#quadb-mergeproof)
-* [Tree Structure](#tree-structure)
+* [Data Structure](#data-structure)
   * [Trees and Exponential Growth](#trees-and-exponential-growth)
   * [Merkle Trees](#merkle-trees)
   * [Keys](#keys)
@@ -43,8 +27,24 @@
 * [Storage](#storage)
   * [LMDB](#lmdb)
   * [nodeId](#nodeid)
-* [nodeType](#nodetype)
+  * [nodeType](#nodetype)
   * [Node layout in storage](#node-layout-in-storage)
+* [Command-line](#command-line)
+  * [quadb init](#quadb-init)
+  * [quadb status](#quadb-status)
+  * [quadb put](#quadb-put)
+  * [quadb get](#quadb-get)
+  * [quadb del](#quadb-del)
+  * [quadb import](#quadb-import)
+  * [quadb export](#quadb-export)
+  * [quadb head](#quadb-head)
+  * [quadb checkout](#quadb-checkout)
+  * [quadb fork](#quadb-fork)
+  * [quadb diff](#quadb-diff)
+  * [quadb patch](#quadb-patch)
+  * [quadb exportProof](#quadb-exportproof)
+  * [quadb importProof](#quadb-importproof)
+  * [quadb mergeProof](#quadb-mergeproof)
 * [C++ Library](#c++-library)
   * [LMDB Environment](#lmdb-environment)
   * [Encoding](#encoding)
@@ -59,6 +59,9 @@
 
 
 
+
+
+
 ## Introduction
 
 Quadrable is an authenticated multi-version embedded database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs.
@@ -69,8 +72,8 @@ Quadrable is an authenticated multi-version embedded database. It is implemented
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
-* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication. See my presentation on merkle trees for a detailed overview FIXME: link.
-* *Binary*: The style of merkle tree used by Quadrable combines together exactly two nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs, as described in FIXME.
+* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
+* *Binary*: The style of merkle tree used by Quadrable combines together exactly two nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs.
 * *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that hashes of the database keys can correspond directly to each leaf's location in the tree.
 
 Values are authenticated by generating and importing proofs:
@@ -107,192 +110,10 @@ You can view a coverage report by running:
 You will need `lcov` installed. The report will be in this file: `quadrable/coverage-report/index.html`
 
 
-## Command-line
 
-The `quadb` command can be used to interact with a Quadrable database. It is very roughly modeled after `git`, so it requires sub-commands to activate its various functions. You can run `quadb` with no arguments to see a short help summary and a list of the available sub-commands.
 
-### quadb init
 
-Before you can use other commands, you must initialise a directory to contain the Quadrable database. By default it inits `./quadb-dir/`:
-
-    $ quadb init
-    Quadrable directory init'ed: ./quadb-dir/
-
-You can specify an alternate directory with the `--db` flag:
-
-    $ quadb --db=$HOME/.quadrable init
-    Quadrable directory init'ed: /home/doug/.quadrable/
-
-Or the `QUADB_DIR` environment variable:
-
-    $ QUADB_DIR=/path/to/quadrable quadb init
-    Quadrable directory init'ed: /path/to/quadrable
-
-### quadb status
-
-The status command shows you some basic information about your current database tree:
-
-    $ quadb init
-    Head: master
-    Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
-
-*Head* is like your current branch in git, and can be thought of as a symbolic link that is updated to point to the latest version of the tree as it is modified. The default head is `master`. Quadrable doesn't call these links "branches" because it has a concept of branches internally, and this would confuse the code too much.
-
-*Root* is the hash of the root node in your database. Provided the hash function is cryptographically secure, this is a globally unique identifier for the current state of the tree pointed to by your head. For an empty tree, a special all-zero value is used (see FIXME).
-
-The number in parentheses after the root hash is the *nodeId*. This is an internal value used by Quadrable and is shown here for informational purposes only (see FIXME).
-
-### quadb put
-
-This adds a new record to the database, or updates an existing one. On success there is no output:
-
-    $ quadb put key val
-
-Unless the value was the same as a previously existing one, the current head will be updated to have a new root, and a new nodeId will be allocated for it:
-
-    $ quadb status
-    Head: master
-    Root: 0x0b84df4f4677733fe0956d3e4853868f54a64d0f86ecfcb3712c18e29bd8249c (1)
-
-### quadb get
-
-This is the complement to `put`, and is used to retrieve previously set values:
-
-    $ quadb get key
-    val
-
-An error will be thrown if you try to get a key that is not present in the tree:
-
-    $ quadb get no-such-key
-    quadb error: key not found in db
-
-### quadb del
-
-This deletes a key from the database. If there was no such key in the database, it does nothing. On success there is no output:
-
-    $ quadb del key
-
-If we run `status` again, we can see the root has changed back to the all-zeros value, signifying an empty tree:
-
-    $ quadb status
-    Head: master
-    Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
-
-This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order in which records were inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting roots.
-
-### quadb import
-
-If you wish to insert multiple records into the DB, running `quadb put` multiple times is inefficient. This is because each time it is run it will need to create new intermediate nodes and discard the previously created ones.
-
-A better way to do it is to use `quadb import` which can put multiple records with a single traversal of the tree. This command reads comma-separated `key,value` pairs from standard input, one per line. The separator can be changed with the `--sep` option. On success there is no output:
-
-    $ perl -E 'for $i (1..1000) { say "key $i,value $i" }' | quadb import
-
-### quadb export
-
-This is the complement to `quadb import`. It dumps the contents of the database as a comma-separated (again, customisable with `--sep`) list of lines:
-
-    $ quadb export
-    key 915,value 915
-    key 116,value 116
-    key 134,value 134
-    key 957,value 957
-    key 459,value 459
-    ...
-
-Note that the output is *not* sorted by the key. It is sorted by the hash of the key, because that is the way records are stored in the tree (FIXME see section on adversarial). You can pipe this output to the `sort` command if you would like it sorted by key.
-
-### quadb head
-
-A database can have many heads. You can view the list of heads with `quadb head`:
-
-    $ quadb head
-    => master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
-
-The `=>` arrow indicates that `master` is the current head. The heads are sorted by `nodeId` (the number in parentheses), so the most recently updated heads will appear at the top (except for empty trees, which always have a nodeId of 0).
-
-`head rm` deletes a head (or does nothing if the head doesn't exist):
-
-    $ quadb head rm headToRemove
-
-### quadb checkout
-
-The `checkout` command can be used to change the current head. If we switch to a brand-new head, then this head will start out as the empty tree. For example, let's switch to a brand-new head called `temp`. On success there is no output:
-
-    $ quadb checkout temp
-
-This new head will not appear in the `quadb head` list until we have completed a write operation, like so:
-
-    $ quadb put tempKey tempVal
-    $ quadb head
-    => temp : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
-       master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
-
-The `tempKey` record that we just inserted only exists in the `temp` head, and if we checkout back to master it would not be visible there.
-
-Running `quadb checkout` with no head name will result in a detached head pointing to an empty tree (see FIXME).
-
-### quadb fork
-
-When we created a new head with checkout, it was initialised to an empty tree. Instead, we may choose to use `quadb fork` to copy the current head to the new head:
-
-    $ quadb fork temp2
-    $ ./quadb head
-       temp : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
-    => temp2 : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
-       master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
-
-Our new `temp2` head starts off with the same root as `temp`. We can now modify `temp2` and it will not affect the `temp` tree.
-
-Although semantically `quadb fork` acts like it copies the tree pointed to by the current head, no copying actually occurs. In fact, the two trees share the same structure so forking is a very inexpensive operation. Cheap database snapshots is an important feature of Quadrable, and is useful for a variety of tasks.
-
-`quadb fork` can take a second argument which represents the head to be copied from, instead of using the current head. Or it can take no arguments, in which case the current head is forked to a detached head (see FIXME).
-
-### quadb diff
-
-You can view the differences between the head you have checked out and another branch with `quadb diff`. If the heads are equivalent, there will be no output:
-
-    $ quadb diff temp
-    $
-
-Let's add a new key, delete an existing one from our current branch, and run `diff` again:
-
-    $ quadb put new test
-    $ quadb del tempKey
-    $ quadb diff temp
-    -tempKey,tempVal
-    +new,test
-
-Now the diff shows one line per modification. If the modification was an insertion or update, the the first character will be `+` and the key/value will be the new record to be set. If it was a deletion, the first character will be `-` and the key/value will be the old record that has been removed.
-
-* You can change the separator using the `--sep` option, just as with `import`/`export`.
-* If two trees have been forked from one another recently, then diffs will be very fast. This is because the algorithm will detect shared portions of the tree and not bother diffing them. Diffing two trees that don't share structure (for example, if they were separately `import`ed from the same data) will still work, but will run slower. In the future we may implement a `dedup` command that uses `diff` to detect equal but unshared structure and make them shared.
-
-### quadb patch
-
-This command accepts a diff on standard input, and applies it to the current head.
-
-* The format is the same as printed by `diff`
-* Lines that start with `#` are treated as comments and are ignored
-* The separator argument `--sep` must match what was used in the `diff` invocation
-
-### quadb exportProof
-
-FIXME
-
-### quadb importProof
-
-FIXME
-
-### quadb mergeProof
-
-FIXME
-
-
-
-
-
-## Tree Structure
+## Data Structure
 
 
 ### Trees and Exponential Growth
@@ -321,9 +142,9 @@ In Quadrable's implementation of a merkle tree, keys are first hashed and then t
 
 Keys are hashed for multiple reasons:
 
-* It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we collapse leaves, as described in FIXME).
+* It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we [collapse leaves](#collapsed-leaves)).
 * Since the hash function used by Quadrable is believed to be cryptographically secure (meaning among other things that it acts like a [random oracle](https://eprint.iacr.org/2015/140.pdf)), the keys should be fairly evenly distributed which reduces the average depth of the tree.
-* It is computationally expensive to find two or more keys that have the same hash prefix, which an adversarial user might like to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See the FIXME adversarial section
+* It is computationally expensive to find two or more keys that have the same hash prefix, which an adversarial user might like to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See [adversarial interaction](#adversarial-interaction).
 
 
 
@@ -372,7 +193,7 @@ In order to prevent this, Quadrable hashes the path information along with the l
 
 There are two reasons for using the hash of the value rather than the value itself:
 
-* For non-inclusion proofs (see FIXME) it is sometimes necessary to send a leaf along with the proof to show that a different leaf lies along the path where the queried leaf exists. In this case, where the verifier doesn't care about the contents of this "witness leaf", we can just include the hash of the value in the proof, which could potentially be much smaller than the full value. Note that the verifier still has enough information to move this witness leaf around in their partial-tree.
+* For [non-inclusion proofs](#non-inclusion-proofs) it is sometimes necessary to send a leaf along with the proof to show that a different leaf lies along the path where the queried leaf exists. In this case, where the verifier doesn't care about the contents of this "witness leaf", we can just include the hash of the value in the proof, which could potentially be much smaller than the full value. Note that the verifier still has enough information to move this witness leaf around in their partial-tree.
 * Combined with the null byte, this ensures the input when hashing a leaf is always 65 bytes long. By contrast, the input when hashing two nodeHashes to get the parent's nodeHash is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, and vice versa.
 
 
@@ -386,7 +207,7 @@ In some cases splitting a leaf will result in more than one branches being added
 
 ![](docs/add-branch-empty.svg)
 
-Quadrable does not store empty nodes, so there are special node types (see FIXME) to indicate if either of the children are empty sub-trees:
+Quadrable does not store empty nodes, so there are special [node types](#nodetype) to indicate if either of the children are empty sub-trees:
 
 * Branch Left: The right node is empty.
 * Branch Right: The left node is empty.
@@ -406,7 +227,7 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 In the diagrams above it shows nodes in the tree being modified during an update. This makes it easier to explain what is happening, but is not actually how the data structure is implemented (sorry about that!). To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
 
-In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the splitting leaves section above (FIXME link), but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted lines):
+In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the [splitting leaves section](#splitting-leaves) above, but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted lines):
 
 ![](docs/cow.svg)
 
@@ -414,7 +235,7 @@ Notice how references to the original tree remain valid after the update.
 
 This copy-on-write behaviour is why our diagrams have the arrows pointing from parent to child. Most descriptions of merkle trees have the arrows pointing the other direction, because that is the direction the hashing is performed (you must hash the children before the parents). While this is still of course true in Quadrable, in our case we decided to draw the arrows are pointing to how the nodes reference each-other, and is therefore the order of traversal when looking up a record.
 
-Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be recovered with a run of the garbage collector. This scans all the trees to find unreachable nodes, and then deletes them. See FIXME
+Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be recovered with a run of the [garbage collector](#garbage-collection). This scans all the trees to find unreachable nodes, and then deletes them.
 
 
 
@@ -439,7 +260,7 @@ When you would like to query the database remotely, do the following steps:
 
 At this point you have a value, but you can't be sure that the result wasn't tampered with. Maybe John's balance is actually "$0.05", or perhaps there isn't a record for John Smith at all.
 
-In order to convince you that the record exists and is correct, the provider must send a proof along with the JSON. You can use this to proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. The way you do that is by hashing the JSON value you received to compute the leaf hash (in Quadrable, first combine it with the key's hash, see the collapsed leaf section FIXME). Next, compute the hash of the leaf's parent.
+In order to convince you that the record exists and is correct, the provider must send a proof along with the JSON. You can use this to proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. The way you do that is by hashing the JSON value you received to compute the leaf hash (in Quadrable, first combine it with the key's hash, see the [collapsed leaf section](#collapsed-leaves). Next, compute the hash of the leaf's parent.
 
 Unfortunately, to compute the parent node's hash you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This is solved by sending this value (called a *witness*) as part of the proof:
 
@@ -628,6 +449,8 @@ The decoding algorithm must keep an index into the strands. This is the current 
 
 
 
+
+
 ## Storage
 
 ### LMDB
@@ -646,11 +469,11 @@ Some implementations of hash trees store leaves and nodes in a database, keyed b
 
 Quadrable does not do this. Instead, every time a node is added, a numeric incrementing `nodeId` is allocated and the node is stored with this key. Although records are not de-duplicated, there are several advantages to this scheme:
 
-* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as locality of reference (FIXME link). In particular, the top few levels of nodes in a tree are likely to reside in the same B-tree page.
+* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, the top few levels of nodes in a tree are likely to reside in the same B-tree page.
 * When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree, since nodeIds are never reused.
 * Intermediate nodes don't store the hashes of their two children nodes, but instead just the nodeIds. This means they only occupy 8+8 bytes, rather than 32+32.
 
-## nodeType
+### nodeType
 
 Internally there are several different types of nodes stored.
 
@@ -676,6 +499,198 @@ The meaning of the remaining bytes depend on the nodeType:
  
     witness:      [8 bytes: \x05 | 0]                [32 bytes: nodeHash]
     witnessLeaf:  [8 bytes: \x06 | 0]                [32 bytes: nodeHash] [32 bytes: keyHash] [32 bytes: valHash]
+
+
+
+
+
+
+
+## Command-line
+
+The `quadb` command can be used to interact with a Quadrable database. It is very roughly modeled after `git`, so it requires sub-commands to activate its various functions. You can run `quadb` with no arguments to see a short help summary and a list of the available sub-commands.
+
+### quadb init
+
+Before you can use other commands, you must initialise a directory to contain the Quadrable database. By default it inits `./quadb-dir/`:
+
+    $ quadb init
+    Quadrable directory init'ed: ./quadb-dir/
+
+You can specify an alternate directory with the `--db` flag:
+
+    $ quadb --db=$HOME/.quadrable init
+    Quadrable directory init'ed: /home/doug/.quadrable/
+
+Or the `QUADB_DIR` environment variable:
+
+    $ QUADB_DIR=/path/to/quadrable quadb init
+    Quadrable directory init'ed: /path/to/quadrable
+
+### quadb status
+
+The status command shows you some basic information about your current database tree:
+
+    $ quadb init
+    Head: master
+    Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
+
+*Head* is like your current branch in git, and can be thought of as a symbolic link that is updated to point to the latest version of the tree as it is modified. The default head is `master`. Quadrable doesn't call these links "branches" because it has a concept of branches internally, and this would confuse the code too much.
+
+*Root* is the hash of the root node in your database. Provided the hash function is cryptographically secure, this is a globally unique identifier for the current state of the tree pointed to by your head. For an empty tree, [a special all-zero value](#sparseness) is used.
+
+The number in parentheses after the root hash is the [nodeId](#nodeid). This is an internal value used by Quadrable and is shown here for informational purposes only.
+
+### quadb put
+
+This adds a new record to the database, or updates an existing one. On success there is no output:
+
+    $ quadb put key val
+
+Unless the value was the same as a previously existing one, the current head will be updated to have a new root, and a new nodeId will be allocated for it:
+
+    $ quadb status
+    Head: master
+    Root: 0x0b84df4f4677733fe0956d3e4853868f54a64d0f86ecfcb3712c18e29bd8249c (1)
+
+### quadb get
+
+This is the complement to `put`, and is used to retrieve previously set values:
+
+    $ quadb get key
+    val
+
+An error will be thrown if you try to get a key that is not present in the tree:
+
+    $ quadb get no-such-key
+    quadb error: key not found in db
+
+### quadb del
+
+This deletes a key from the database. If there was no such key in the database, it does nothing. On success there is no output:
+
+    $ quadb del key
+
+If we run `status` again, we can see the root has changed back to the all-zeros value, signifying an empty tree:
+
+    $ quadb status
+    Head: master
+    Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
+
+This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order in which records were inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting roots.
+
+### quadb import
+
+If you wish to insert multiple records into the DB, running `quadb put` multiple times is inefficient. This is because each time it is run it will need to create new intermediate nodes and discard the previously created ones.
+
+A better way to do it is to use `quadb import` which can put multiple records with a single traversal of the tree. This command reads comma-separated `key,value` pairs from standard input, one per line. The separator can be changed with the `--sep` option. On success there is no output:
+
+    $ perl -E 'for $i (1..1000) { say "key $i,value $i" }' | quadb import
+
+### quadb export
+
+This is the complement to `quadb import`. It dumps the contents of the database as a comma-separated (again, customisable with `--sep`) list of lines:
+
+    $ quadb export
+    key 915,value 915
+    key 116,value 116
+    key 134,value 134
+    key 957,value 957
+    key 459,value 459
+    ...
+
+Note that the output is *not* sorted by the key. It is sorted by the hash of the key, because that is the way records are stored in the tree (see the section on [adversarial](#adversarial)). You can pipe this output to the `sort` command if you would like it sorted by key.
+
+### quadb head
+
+A database can have many heads. You can view the list of heads with `quadb head`:
+
+    $ quadb head
+    => master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
+
+The `=>` arrow indicates that `master` is the current head. The heads are sorted by `nodeId` (the number in parentheses), so the most recently updated heads will appear at the top (except for empty trees, which always have a nodeId of 0).
+
+`head rm` deletes a head (or does nothing if the head doesn't exist):
+
+    $ quadb head rm headToRemove
+
+### quadb checkout
+
+The `checkout` command can be used to change the current head. If we switch to a brand-new head, then this head will start out as the empty tree. For example, let's switch to a brand-new head called `temp`. On success there is no output:
+
+    $ quadb checkout temp
+
+This new head will not appear in the `quadb head` list until we have completed a write operation, like so:
+
+    $ quadb put tempKey tempVal
+    $ quadb head
+    => temp : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
+       master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
+
+The `tempKey` record that we just inserted only exists in the `temp` head, and if we checkout back to master it would not be visible there.
+
+Running `quadb checkout` with no head name will result in a [detached head](#heads) pointing to an empty tree.
+
+### quadb fork
+
+When we created a new head with checkout, it was initialised to an empty tree. Instead, we may choose to use `quadb fork` to copy the current head to the new head:
+
+    $ quadb fork temp2
+    $ ./quadb head
+       temp : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
+    => temp2 : 0xf4f60482d2e639d24d6dfae605337968a86c404f5c41286987a916e40af21261 (2427)
+       master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
+
+Our new `temp2` head starts off with the same root as `temp`. We can now modify `temp2` and it will not affect the `temp` tree.
+
+Although semantically `quadb fork` acts like it copies the tree pointed to by the current head, no copying actually occurs. In fact, the two trees share the same structure so forking is a very inexpensive operation. Cheap database snapshots is an important feature of Quadrable, and is useful for a variety of tasks.
+
+`quadb fork` can take a second argument which represents the head to be copied from, instead of using the current head. Or it can take no arguments, in which case the current head is forked to a [detached head](#heads).
+
+### quadb diff
+
+You can view the differences between the head you have checked out and another branch with `quadb diff`. If the heads are equivalent, there will be no output:
+
+    $ quadb diff temp
+    $
+
+Let's add a new key, delete an existing one from our current branch, and run `diff` again:
+
+    $ quadb put new test
+    $ quadb del tempKey
+    $ quadb diff temp
+    -tempKey,tempVal
+    +new,test
+
+Now the diff shows one line per modification. If the modification was an insertion or update, the the first character will be `+` and the key/value will be the new record to be set. If it was a deletion, the first character will be `-` and the key/value will be the old record that has been removed.
+
+* You can change the separator using the `--sep` option, just as with `import`/`export`.
+* If two trees have been forked from one another recently, then diffs will be very fast. This is because the algorithm will detect shared portions of the tree and not bother diffing them. Diffing two trees that don't share structure (for example, if they were separately `import`ed from the same data) will still work, but will run slower. In the future we may implement a `dedup` command that uses `diff` to detect equal but unshared structure and make them shared.
+
+### quadb patch
+
+This command accepts a diff on standard input, and applies it to the current head.
+
+* The format is the same as printed by `diff`
+* Lines that start with `#` are treated as comments and are ignored
+* The separator argument `--sep` must match what was used in the `diff` invocation
+
+### quadb exportProof
+
+FIXME
+
+### quadb importProof
+
+FIXME
+
+### quadb mergeProof
+
+FIXME
+
+
+
+
+
 
 
 
