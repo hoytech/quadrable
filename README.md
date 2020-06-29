@@ -333,6 +333,24 @@ A proof is a record from the tree along with enough information for somebody who
 
 The purpose of using a tree structure is so that the information required in a proof is proportional to the depth of the tree, and not the total number of nodes.
 
+### Proofs and witnesses
+
+When you, as a remote user, would like to query the database do the following steps:
+
+* Acquire a copy of the root hash (32 bytes) from some trusted source.
+* Hash the key of the record you would like to search for. Let's say you're looking for the record `"John Smith"` and it hashes to `1011` in binary (using a 4-bit hash for sake of explanation, normally this would be 256 bits). This is the path that will be used to traverse the tree to this record.
+* Ask a provider who has the full data-set available to send you the value for the record that has this hash. Suppose they send you a JSON blob like `{"name":"John Smith","balance":"$200",...}`.
+
+![](docs/proof1.svg)
+
+At this point you have a value, but you can't be sure that the JSON wasn't tampered with. Maybe John's balance is actually "$0.05", or perhaps there isn't a record for John Smith at all.
+
+In order to convince you that the record is correct, the provider must send a proof along with the JSON. You can use this to proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. The way you do that is by hashing the JSON value you received to compute the leaf hash (in Quadrable, first combine it with the key's hash, see the collapsed leaf section FIXME). Next, compute the hash of the leaf's parent.
+
+However, to compute the parent node's hash you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This value is known as a *witness* and is part of the proof that is provided:
+
+![](docs/proof2.svg)
+
 
 
 
