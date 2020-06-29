@@ -185,16 +185,15 @@ You can view the differences between the head you have checked out and another b
     $ quadb diff temp
     $
 
-Let's add a new key and delete an existing one from our current branch:
+Let's add a new key, delete an existing one from our current branch, and run `diff` again:
 
     $ quadb put new test
     $ quadb del tempKey
-
-Now the diff shows one line per modification. If the modification was an insertion or update, the the first character will be `+` and the key/value will be the new value to be set. If it was a deletion, the first character will be `-` and the key/value will be the old value that has been removed.
-
     $ quadb diff temp
     -tempKey,tempVal
     +new,test
+
+Now the diff shows one line per modification. If the modification was an insertion or update, the the first character will be `+` and the key/value will be the new record to be set. If it was a deletion, the first character will be `-` and the key/value will be the old record that has been removed.
 
 * You can change the separator using the `--sep` option, just as with `import`/`export`.
 * If two trees have been forked from one another recently, then diffs will be very fast. This is because the algorithm will detect shared portions of the tree and not bother diffing them. Diffing two trees that don't share structure (for example, if they were separately `import`ed from the same data) will still work, but will run slower. In the future we may implement a `dedup` command that uses `diff` to detect equal but unshared structure and make them shared.
@@ -403,6 +402,29 @@ After taking these observations into account, we see that if we are sending a co
 ![](docs/proof5.svg)
 
 By the way, consider the degenerate case of creating a proof for *all* the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways.
+
+
+
+
+### Non-inclusion proofs
+
+So far we have discussed proving that a queried value exists in the database. For many applications it is also necessary to be able to prove that a value does *not* exist in the database. These are called "non-inclusion proofs".
+
+In a pure sparse merkle tree, every leaf is conceptually present in the tree, even if they are empty. In this case it would be sufficient to provide a proof showing the existence of an empty leaf along the queried path. However, Quadrable uses the collapsed leaf optimisation which means that this will not work since the paths to the empty leaves might be blocked by collapsed leaves. Because of this, non-inclusion proofs are slightly more complicated, however this is well worth the reduction in proof sizes we get from collapsed nodes.
+
+To provide a non-inclusion proof, Quadrable uses one of two methods, depending on the structure of the tree and the key hash of the queried record.
+
+The first method is to present a branch where the corresponding child node is occupied by an empty sub-tree value (all zeros):
+
+![](docs/non-inclusion-empty.svg)
+
+The second method is to present a leaf node that is on the corresponding path, but has a different key hash. This conflicting leaf is called a "witness leaf":
+
+![](docs/non-inclusion-empty.svg)
+
+Both of these methods are proved just like inclusion proofs: There is an untrusted value that will be hashed and then combined with witnesses up the tree until a candidate root node is reached. If this candidate root matches the trusted root then the non-inclusion proof is satisifed.
+
+Witness leafs are just like regular proof-of-inclusion leafs, except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value, they merely wish to prove that it is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible that a leaf will be used for a non-inclusion instead of a witness leaf in a combined proof. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
 
 
 
