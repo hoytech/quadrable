@@ -1,10 +1,8 @@
 lib
+  ! tests for diff and mergeProof
   - proof suitable for deletion (uses witnessLeafs instead of witnesses where necessary)
     - WitnessBranch
-  - import proof to existing tree, as long as root matches
-    ? merge trees
   - warn when exporting partial tree
-  - tests for diff and mergeProof
   ? ability to compact tree to ensure node Ids are sequential
   ? try putting leaves in their own node key-space to improve locality of interior nodes
   ? maybe way to avoid needing to store stuff in lmdb to validate a proof?
@@ -14,11 +12,5 @@ lib
 solidity impl
 
 docs
-  - auto generate TOC
-  - two reasons to hash val in leafs: guarantee sizeof(leaf) != sizeof(node), and make it so you don't need to provide potentially large vals during non-existence proofs
-  - key hash suffixes of empty witnesses are 0'd out: optimization for evm
   - adversarial proof bloating
     - mine 2 values with common N-bit prefix (can use birthday attacks)
-  - encoding (lack thereof) used for keys/vals
-    - no length limits, not even keys (because stored as hashes)
-  - proof encoding starts at end, because first must be merged last, and because negative numbers have larger range in twos complement

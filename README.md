@@ -15,7 +15,6 @@
   * [Collapsed Leaves](#collapsed-leaves)
   * [Splitting Leaves](#splitting-leaves)
   * [Bubbling](#bubbling)
-  * [Copy-On-Write](#copy-on-write)
 * [Proofs](#proofs)
   * [Proofs and witnesses](#proofs-and-witnesses)
   * [Combined Proofs](#combined-proofs)
@@ -24,11 +23,14 @@
   * [Commands](#commands)
   * [Proof encodings](#proof-encodings)
   * [Compact encoding](#compact-encoding)
+  * [Proof bloating](#proof-bloating)
 * [Storage](#storage)
+  * [Copy-On-Write](#copy-on-write)
   * [LMDB](#lmdb)
   * [nodeId](#nodeid)
   * [nodeType](#nodetype)
   * [Node layout in storage](#node-layout-in-storage)
+  * [Key tracking](#key-tracking)
 * [Command-line](#command-line)
   * [quadb init](#quadb-init)
   * [quadb status](#quadb-status)
@@ -55,6 +57,7 @@
   * [Garbage Collection](#garbage-collection)
 * [Author and Copyright](#author-and-copyright)
 <!-- END OF TOC -->
+
 
 
 
@@ -144,7 +147,7 @@ Keys are hashed for multiple reasons:
 
 * It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we [collapse leaves](#collapsed-leaves)).
 * Since the hash function used by Quadrable is believed to be cryptographically secure (meaning among other things that it acts like a [random oracle](https://eprint.iacr.org/2015/140.pdf)), the keys should be fairly evenly distributed which reduces the average depth of the tree.
-* It is computationally expensive to find two or more keys that have the same hash prefix, which an adversarial user might like to do to increase the cost of traversing the tree or, even worse, increase the proof sizes. See [adversarial interaction](#adversarial-interaction).
+* It is computationally expensive to find two or more keys that have the same hash prefix, which an adversarial user might like to do to increase the cost of traversing the tree or, even worse, [increase the proof sizes](#proof-bloating).
 
 
 
@@ -223,20 +226,6 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 ![](docs/bubbling.svg)
 
 
-### Copy-On-Write
-
-In the diagrams above it shows nodes in the tree being modified during an update. This makes it easier to explain what is happening, but is not actually how the data structure is implemented (sorry about that!). To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
-
-In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the [splitting leaves section](#splitting-leaves) above, but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted lines):
-
-![](docs/cow.svg)
-
-Notice how references to the original tree remain valid after the update.
-
-This copy-on-write behaviour is why our diagrams have the arrows pointing from parent to child. Most descriptions of merkle trees have the arrows pointing the other direction, because that is the direction the hashing is performed (you must hash the children before the parents). While this is still of course true in Quadrable, in our case we decided to draw the arrows are pointing to how the nodes reference each-other, and is therefore the order of traversal when looking up a record.
-
-Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be recovered with a run of the [garbage collector](#garbage-collection). This scans all the trees to find unreachable nodes, and then deletes them.
-
 
 
 
@@ -299,9 +288,9 @@ By the way, consider the degenerate case of creating a proof for *all* the leave
 
 ### Non-inclusion proofs
 
-So far we have discussed proving that a queried value exists in the database. For many applications it is also necessary to be able to prove that a value does *not* exist in the database. These are called "non-inclusion proofs".
+So far we have discussed proving that a queried value *exists* in the database. For many applications it is also necessary to prove that a value does *not* exist. These are called "non-inclusion proofs".
 
-In a pure sparse merkle tree, every leaf is conceptually present in the tree, even if they are empty. In this case it would be sufficient to provide an existence proof for the corresponding empty leaf. However, Quadrable uses the collapsed leaf optimisation which means that this will not work since the paths to the empty leaves might be blocked by collapsed leaves. Because of this, non-inclusion proofs are slightly more complicated, however this is well worth the reduction in proof sizes we get from collapsed nodes.
+In a pure sparse merkle tree, every leaf is conceptually present in the tree, even if it is empty. In such systems it would be sufficient to provide an existence proof for the corresponding empty leaf. However, Quadrable uses the collapsed leaf optimisation which means that this will not work since the paths to the empty leaves might be blocked by collapsed leaves. Because of this, non-inclusion proofs are slightly more complicated, however this complexity is more than made up for by the reduction in proof sizes.
 
 To provide a non-inclusion proof, Quadrable uses one of two methods, depending on the structure of the tree and the key hash of the queried record.
 
@@ -309,13 +298,17 @@ The first method is to present a branch where the corresponding child node is oc
 
 ![](docs/non-inclusion-empty.svg)
 
+* Note: As an optimisation, when providing the keyHash for a non-existing leaf in an empty non-inclusion proof the keyHash has its trailing bits zeroed out. For instance, in the diagram above, the record to be proven to not exist could have the key hash `101100101111001...` but the proof would instead prove that the record with key hash `101000000000000...` does not exist. This results in the same partial-tree, however the encoded proof contains more zero bytes, which are cheaper when included in calldata for an Ethereum smart contract.
+
 The second method is to present a leaf node that is on the corresponding path, but has a different key hash. This conflicting leaf is called a "witness leaf":
 
 ![](docs/non-inclusion-witnessleaf.svg)
 
 Both of these methods are proved in the same way as inclusion proofs: There is an untrusted value that will be hashed and then combined with witnesses up the tree until a candidate root node is reached. If this candidate root matches the trusted root then the non-inclusion proof is satisifed.
 
-Witness leaves are like regular proof-of-inclusion leaves except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value (which may be quite large). Instead, they merely wish to prove that it is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible for a leaf to be used for a non-inclusion proof instead of a witness leaf. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
+In fact, at the proof level there is no such thing as a non-inclusion proof. The proofs provide just enough information for the verifier to construct a tree that they can use to determine the key they are interested in does not exist.
+
+Witness leaves are like regular proof-of-inclusion leaves except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value (which could be large). Instead, they merely wish to prove that it is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible for a leaf to be used for a non-inclusion proof instead of a witness leaf. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
 
 
 
@@ -324,7 +317,7 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 ![](docs/strands1.svg)
 
-Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data (although practically it's easier to have 2 passes: a setup pass and a processing pass). They can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will result in a ready-to-use partial-tree.
+Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data (although practically it's simpler to have 2 passes: a setup pass and a processing pass). They can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will result in a ready-to-use partial-tree.
 
 Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than values requested to be proven. This can happen when, while processing a strand, a witness reveals an empty sub-tree and this is sufficient for satisfying a requested non-inclusion proof.
 
@@ -449,9 +442,35 @@ The decoding algorithm must keep an index into the strands. This is the current 
 
 
 
+### Proof bloating
+
+Since the number of witnesses is proportional to the depth of the tree, given a nicely balance tree the number of witnesses needed for a proof is roughly the base-2 logarithm of the total number of nodes in the tree. Thanks to the beauty of logarithmic growth, this is usually quite manageable. A tree of a million records needs about 20 witnesses. A billion, 30 witnesses.
+
+However, in the worst case scenario we would need 255 witnesses, if there were two records in the database whose keyHashes share a common prefix that is 255 bits long. Fortunately, we can assume that it is computationally expensive to find a pair of records that have a long shared prefix. In fact, this is one of the reasons we make sure to hash keys before using them as paths in our tree. If users were able to present hashes of keys to be inserted into the DB without having to provide the corresponding preimages (unhashed versions), then they could deliberately put values into the DB that cause very long proofs to be generated.
+
+But because of the hashing requirement, an adversary who wants to bloat the proof sizes needs to "mine" (using the bitcoin terminology)
+
+
+
+
 
 
 ## Storage
+
+### Copy-On-Write
+
+In the diagrams in above it shows nodes in the tree being modified during an update. This makes it easier to explain what is happening, but is not actually how the data structure is stored. To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
+
+In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the [splitting leaves section](#splitting-leaves), but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted lines):
+
+![](docs/cow.svg)
+
+Notice how references to the original tree remain valid after the update.
+
+This copy-on-write behaviour is why our diagrams have the arrows pointing from parent to child. Most descriptions of merkle trees have the arrows pointing the other direction, because that is the direction the hashing is performed (you must hash the children before the parents). While this is still of course true in Quadrable, in our case we decided to draw the arrows indicating how the nodes reference each-other. This is also the order of traversal when looking up a record.
+
+Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be cleaned up with a run of the [garbage collector](#garbage-collection). This scans all the trees to find unreachable nodes, and then deletes them.
+
 
 ### LMDB
 
@@ -479,7 +498,7 @@ Internally there are several different types of nodes stored.
 
 * **Branches**: These are interior nodes that reference one or two children nodes. In the case where one of the nodes is an empty node, a branch left/right node is used. If the right child is empty, a branch left node is used, and vice versa. If neither are empty then a branch both node is used. Note that a branch implies that there are 2 or more leaves somewhere underneath this node, otherwise the branch node would be collapsed to a leaf or would be empty.
 * **Empty**: Empty nodes are not stored in the database, but instead are implicit children of branch left/right nodes.
-* **Leaf**: These are collapsed leaves, and contain enough information to satisfy get/put/del operations, and to be moved. A hash of the key is stored, but not the key itself. This is (optionally) stored in a separate table. See trackKeys FIXME
+* **Leaf**: These are collapsed leaves, and contain enough information to satisfy get/put/del operations, and to be moved. A hash of the key is stored, but not the key itself. This is (optionally) stored in a [separate table](#key-tracking).
 * **Witness** and **WitnessLeaf**: These are nodes that exist in partial-trees. A Witness node could be standing in for either a branch or a leaf, but a WitnessLeaf could only be a Leaf. The only difference between a WitnessLeaf and a Leaf is that the WitnessLeaf only stores a hash of the value, not the value itself. This means that it cannot be used to satisfy a get request. However, it still could be used for non-inclusion purposes, or for updating/deletion.
 
 ### Node layout in storage
@@ -501,6 +520,9 @@ The meaning of the remaining bytes depend on the nodeType:
     witnessLeaf:  [8 bytes: \x06 | 0]                [32 bytes: nodeHash] [32 bytes: keyHash] [32 bytes: valHash]
 
 
+### Key tracking
+
+FIXME
 
 
 
@@ -599,7 +621,7 @@ This is the complement to `quadb import`. It dumps the contents of the database 
     key 459,value 459
     ...
 
-Note that the output is *not* sorted by the key. It is sorted by the hash of the key, because that is the way records are stored in the tree (see the section on [adversarial](#adversarial)). You can pipe this output to the `sort` command if you would like it sorted by key.
+Note that the output is *not* sorted by the key. It is sorted by the hash of the key, because that is the way records are stored in the tree (see the section on [proof bloating](#proof-bloating)). You can pipe this output to the `sort` command if you would like it sorted by key.
 
 ### quadb head
 
