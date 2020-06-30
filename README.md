@@ -197,7 +197,7 @@ In order to prevent this, Quadrable hashes the path information along with the l
 There are two reasons for using the hash of the value rather than the value itself:
 
 * For [non-inclusion proofs](#non-inclusion-proofs) it is sometimes necessary to send a leaf along with the proof to show that a different leaf lies along the path where the queried leaf exists. In this case, where the verifier doesn't care about the contents of this "witness leaf", we can just include the hash of the value in the proof, which could potentially be much smaller than the full value. Note that the verifier still has enough information to move this witness leaf around in their partial-tree.
-* Combined with the null byte, this ensures the input when hashing a leaf is always 65 bytes long. By contrast, the input when hashing two nodeHashes to get the parent's nodeHash is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, and vice versa.
+* Combined with the null byte, this ensures the input when hashing a leaf is always 65 bytes long. By contrast, the input when hashing two nodeHashes to get the parent's nodeHash is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, nor vice versa.
 
 
 ### Splitting Leaves
@@ -206,11 +206,11 @@ Since a collapsed leaf is occupying a spot high up in the tree that could potent
 
 ![](docs/split-leaf.svg)
 
-In some cases splitting a leaf will result in more than one branches being added. This happens when the leaf being added shares additional prefix bits with the leaf being split. These extra intermediate branches have empty nodes as one of their children.
+Sometimes splitting a leaf will result in more than one branches being added. This happens when the leaf being added shares additional prefix bits with the leaf being split. These extra intermediate branches each an have empty node as one of their children.
 
 ![](docs/add-branch-empty.svg)
 
-Quadrable does not store empty nodes, so there are special [node types](#nodetype) to indicate if either of the children are empty sub-trees:
+Quadrable does not store empty nodes, so there are special [node types](#nodetype) to indicate if either of the children are empty sub-trees. These are the types of branch nodes:
 
 * Branch Left: The right node is empty.
 * Branch Right: The left node is empty.
@@ -249,9 +249,9 @@ When you would like to query the database remotely, do the following steps:
 
 At this point you have a value, but you can't be sure that the result wasn't tampered with. Maybe John's balance is actually "$0.05", or perhaps there isn't a record for John Smith at all.
 
-In order to convince you that the record exists and is correct, the provider must send a proof along with the JSON. You can use this to proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. The way you do that is by hashing the JSON value you received to compute the leaf hash (in Quadrable, first combine it with the key's hash, see the [collapsed leaf section](#collapsed-leaves). Next, compute the hash of the leaf's parent.
+In order to convince you that the record exists and is correct, the provider must send a proof along with the JSON. You can use this to proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. First compute the leaf hash. In Quadrable you do that by hashing the JSON value and combining it with the key's hash (see [collapsed leaves](#collapsed-leaves)).
 
-Unfortunately, to compute the parent node's hash you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This is solved by sending this value (called a *witness*) as part of the proof:
+Next, you must compute the hash of the leaf's parent node. Unfortunately, to compute this you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This is solved by sending this value (called a *witness*) as part of the proof:
 
 ![](docs/proof2.svg)
 
@@ -259,29 +259,31 @@ Now you need to compute the next parent's hash, which requires another witness. 
 
 ![](docs/proof3.svg)
 
-* Whether the witness is the left child or the right child depends on the value of the path at that level. If it is a `1` then the witness is on the left, since the value is stored underneath the right node (and vice versa). You can think of a witness as a sub-tree that you don't care about, so you are just getting a summarised value that covers all of the nodes underneath that portion of the tree.
-* There is a witness for every level of the tree. Since Quadrable uses collapsed leaves, this will be less than the full size of the hash. If we can assume hashes are randomly distributed, then this will be roughly log2(N): That is, if there are a million items in the DB there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in depth is the beauty of trees and logarithmic growth).
-* The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we can trust the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
+* Whether the witness is the left child or the right child depends on the value of the path at that level. If it is a `1` then the witness is on the left, since the value is stored underneath the right node (and vice versa). You can think of a witness as a sub-tree that you don't care about, so you just need a summarised value that covers all of the nodes underneath it.
+* There is a witness for every level of the tree. Since Quadrable uses collapsed leaves, this will be less than the full bit-length of the hash. [If we can assume](#proof-bloating) hashes are randomly distributed, then this will be roughly log2(N): That is, if there are a million items in the DB there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in witnesses relative to nodes illustrates the beauty of trees and logarithmic growth).
+* The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we have verified the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
 
 
 ### Combined Proofs
 
-The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes. To do the verification, it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root. The yellow nodes in the above diagrams are computed as part of verifying the proof. 
+The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes, usually in order from deepest to the root. To do the verification, it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root. The yellow nodes in the above diagrams are computed as part of verifying the proof.
 
-This is pretty much as good as you can do with the proof for a single leaf (except perhaps to indicate empty sub-trees somehow so you don't need to send them along with the proof -- see below). However, let's suppose we want to prove multiple values at the same time. Here are the two proofs for different leaves:
+This is pretty much as good as you can do with the proof for a single leaf (except perhaps to indicate empty sub-trees somehow so you don't need to send them along with the proof).
+
+However, suppose we want to prove multiple values at the same time. Trivially, we could request separate proofs for each of them. Here are the two proofs for different leaves:
 
 ![](docs/proof4.svg)
 
-To prove both of these values independently, we would need to send 8 witnesses in total. However, if we are proving both together, there are some observations we should make:
+To prove both of these values independently, the proofs would need 8 witnesses in total. However, observe the following:
 
-* Since we are authenticating values from the same tree, the top 2 witnesses will be the same, and are therefore redundant. We should try to not include the same witness multiple times in a proof.
-* On the third level, the node that was sent as a witness in one proof is a computed node in the other proof, and vice versa. Since the verifier is going to be computing this value anyway, there is no need to send any witnesses for this level.
+* Since we are authenticating values from the same tree, the top 2 witnesses will be the same, and are therefore redundant.
+* On the third level, the node that was sent as a witness in one proof is a computed node in the other proof, and vice versa. Since the verifier is going to be computing these values anyway, there is no need for the proof to contain *any* witnesses for this level.
 
 After taking these observations into account, we see that if we are sending a combined proof for these two leaves, we actually only need to send 4 witnesses:
 
 ![](docs/proof5.svg)
 
-By the way, consider the degenerate case of creating a proof for *all* the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways.
+By the way, consider the degenerate case of creating a proof for all of the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways.
 
 
 
@@ -319,7 +321,7 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data (although practically it's simpler to have 2 passes: a setup pass and a processing pass). They can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will result in a ready-to-use partial-tree.
 
-Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than values requested to be proven. This can happen when, while processing a strand, a witness reveals an empty sub-tree and this is sufficient for satisfying a requested non-inclusion proof.
+Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than values requested to be proven. This can happen when a proof constructor realises that a witness will reveal an empty sub-tree that is sufficient for satisfying a requested non-inclusion proof.
 
 A Quadrable proof includes a list of strands, *sorted by the hashes of their keys*. Each strand contains the following:
 
@@ -329,62 +331,61 @@ A Quadrable proof includes a list of strands, *sorted by the hashes of their key
   * Leaf: A regular leaf value, suitable for satisfying a get or update request
   * WitnessLeaf: A leaf value, suitable for proving non-inclusion
   * Witness: An unspecified node, suitable for proving non-inclusion
-* Value, the contents of which depends on the record type:
+* A value, the meaning of which depends on the record type:
   * Leaf: The leaf value (ie the result of a get query)
   * WitnessLeaf: The hash of the leaf value (allows to prover to create the nodeHash)
   * Witness: Unused
 
-The first thing the verifier should do is run some initial setup on each strand:
+The first thing the verifier should do is run some initial setup on each strand (although this can be done lazily on first access instead, if desired):
 
 * Hash the key (if key was included)
-* Compute the nodeHash (if node type was Leaf or WitnessLeaf). This is now called the strand's nodeHash
+* Compute the strand's nodeHash: If the record type is Leaf or WitnessLeaf, compute the leaf nodeHash. If Witness, then use the key hash directly for this
 * Set a `merged` boolean value to `false`
-* Set a `next` index value to `i+1`, where `i` is the node's index in the list. This functions as a singly-linked list of unmerged strands
+* Set a `next` index value to `i+1` where `i` is the node's index in the list, or an empty sentinel for the last strand (for example, `-1`). This functions as a singly-linked list of unmerged strands
 
 ### Commands
 
-In addition to the list of strands, a Quadrable proof includes a list of commands. These are instructions on how to process the strands. After running all the commands the root will be reconstructed and (assuming it matches the trusted root) the proof is verified.
+In addition to the list of strands, a Quadrable proof includes a list of commands. These are instructions on how to process the strands. After running all the commands, all the strands will have been merged into one strand and the root will be reconstructed. Assuming this candidate root matches the trusted root, the proof is considered verified.
 
 Every command specifies a strand by its index in the strand list. After running a command this strand's depth will decrease by 1.
 
 There are 3 types of commands ("ops"):
 
-* `HashProvided`: Take the provided witness, concatenate it with the specified strand's nodeHash, and hash, storing the result into this strand's nodeHash. The order of concatenation depends on the `depth` bit of the strand's keyHash.
+* `HashProvided`: Take the provided witness, concatenate it with the specified strand's nodeHash, and hash, storing the result into this strand's nodeHash. The order of concatenation depends on the bit of the strand's keyHash at position `depth`.
 * `HashEmpty`: The same as the previous, but there is no provided witness. Instead, the empty sub-tree nodeHash (32 zero bytes) is used.
 * `Merge`: Take this strand's nodeHash and concatenate and hash it with the nodeHash of the next un-merged strand in the strand list, which can be found by looking at the `next` linked list.
-  * Implementations should check that the `merged` flag is false in the `next` strand, and that both strands are at the same depth.
-  * After the merge, the `next` strand should have `merged` set to true, and should be unlinked from the linked list.
+  * Check that the `merged` flag is false in the `next` strand, and that both strands are at the same depth.
+  * After the merge, set `merged` to true in the `next` strand, and unlink it from the linked list.
 
 After processing all commands, implementations should check the following:
 
 * The first strand has an empty `next` linked list, meaning all strands have merged into the left-most strand
-* The first strand has a depth of 0, meaning it is the candidate root node
+* The first strand has a depth of 0, meaning it has reached the root
 * The first strand's nodeHash is equal to the trusted root
 
-While processing commands, implementations should be creating nodes along the way for later querying. Technically, this is optional and an implementation could just verify the root hash and then rely on the initial strand values. However, it is easier to make security-related mistakes with this approach. For example, suppose an implementation forgot to check the first strand had an empty `next` linked list after processing. In this case, an unauthenticated value could be in the initial strands that was never merged into the root. The tree-construction method "fails safe" in the presence of this mistake (among others) since this unauthenticated value will never get added to the created tree used for querying.
+While processing commands, implementations should be creating nodes along the way for later querying. Technically this is optional and an implementation could just verify the root hash and then rely on the values included in the initial strand data. However, it is easier to make security-related mistakes with this approach. For example, suppose an implementation forgets to check that the first strand has an empty `next` linked list after processing the proof. In this case, an unauthenticated value could be in the initial strands that was never merged into the root. The tree-construction method "fails safe" in the presence of this mistake (among others) since this unauthenticated value will never get added to the created tree used for querying.
 
-Furthermore, a tree structure will be required in order to compute a new root after making modifications to these values, so in this case you may as well create a partial-tree while processing the proof. And if you support building a partial-tree like this, any other handling of the strand values is duplicated code, which should be avoided.
+Furthermore, a tree structure will be required in order to compute a new root after making modifications to these values, so in this case you may as well create a partial-tree while processing the proof. And if you do support building a partial-tree like this, any other handling of the strand values is duplicated code, which should be avoided.
 
 
 
 ### Proof encodings
 
-There are a variety of ways that proofs could be encoded (whether using the strands model or otherwise). Quadrable has a conceptual separation between a proof and its encoding. At the C++ level there is a `quadrable::Proof` class, and it contains an abstract definition of the proof. In order to serialize this to something that can be transmitted, there is an `encodeProof()` function. It takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
+There are a variety of ways that proofs could be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialize this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
-* `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible.
-* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports enumeration by key.
+* `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible, but the optimizer still has room for improvement.
+* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking).
 
-Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parens above. Since the two encoding types implemented so far are similar, I will describe them concurrently and point out the minor differences as they arise.
+Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
 
-Although the C++ implementation has an intermediate representation of a decoded proof, other implementations may choose to directly process the encoded form.
+Although the C++ implementation has the `quadrable::Proof` intermediate representation of proofs which it converts encoded proofs into prior to processing, other implementations may choose to directly process the encoded form.
 
-If small proof size is important, an encoding-time optimizer can do extra work to minimize the number of commands required, which reduces the proof size.
 
 
 
 ### Compact encoding
 
-The first byte is the version byte described above, and then strands and commands are serialized in order:
+The first byte is the version byte described above, and then strands and commands are serialized:
 
     [1 byte proof type]
     [ProofStrand]+
@@ -430,26 +431,33 @@ The encoded commands are 1 byte each, and they do not correspond exactly with th
 The hashing details are 7 bits that indicate a sequence of either hashing with a provided witness value or an empty sub-tree (32 zero bytes).
 
 * Only 6 or fewer of the bits can actually be used for hashing directives. These bytes are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are used (`0` means empty and `1` means provided witness). This way between 1 and 6 hashes can be applied per hashing byte.
-* The witnesses are provided inline, that is they are the 32 bytes directly after the command byte. These 32 bytes are then skipped over and the next command is the following byte.
-* If all 7 bits in the hashing details are `0` (there is no marker bit) then the command says to merge this strand with the next unmerged strand (which can be found via the `next` linked list)
+* The witnesses are provided inline, that is they are the 32 bytes directly after the command byte. These 32 bytes are then skipped over and the next command is the following byte (unless more witnesses follow).
+* If all 7 bits in the hashing details are `0` (there is no marker bit) then the command says to merge this strand with the next unmerged strand (which can be found via the `next` linked list). In the `next` strand, `merged` is set to true and this strand is unlinked.
 
-The decoding algorithm must keep an index into the strands. This is the current "working strand". The jump commands alter this index, so that subsequent hashing commands can work on other strands.
+The decoding algorithm keeps a variable that stores index into the strands. This is the current "working strand". The jump commands alter this index, so that subsequent hashing commands can work on other strands.
 
-* The initial working strand is the *last* (right-most) strand. This was an arbitrary choice, but usually the strands are worked on starting at the right, because left strands survive longer (the left-most one always becomes the final strand).
+* The initial value of the working strand is the *last* (right-most) strand. This was an arbitrary choice, but usually the strands are worked on starting at the right, because left strands survive longer (the left-most one always becomes the final strand).
 * The short jumps simply add one to the 5 bit distance and add or subtract this from the working strand
-* The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows an implementation to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which don't make sense)
-* Implementations should check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap" around, which could allow some clever encoding-time optimizations, especially if the number of strands is relatively prime with 2, but the added complexity didn't seem worth it.
+* The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows an implementation to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
+* Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap" around, which could allow some clever encoding-time optimizations, especially if the number of strands is relatively prime with 2, but the added complexity didn't seem worth it.
 
 
 
 ### Proof bloating
 
-Since the number of witnesses is proportional to the depth of the tree, given a nicely balance tree the number of witnesses needed for a proof is roughly the base-2 logarithm of the total number of nodes in the tree. Thanks to the beauty of logarithmic growth, this is usually quite manageable. A tree of a million records needs about 20 witnesses. A billion, 30 witnesses.
+Since the number of witnesses is proportional to the depth of the tree, given a nicely balanced tree the number of witnesses needed for a proof of one value is roughly the base-2 logarithm of the total number of nodes in the tree. Thanks to the beauty of logarithmic growth, this is usually quite manageable. A tree of a million records needs about 20 witnesses. A billion, 30 witnesses.
 
-However, in the worst case scenario we would need 255 witnesses, if there were two records in the database whose keyHashes share a common prefix that is 255 bits long. Fortunately, we can assume that it is computationally expensive to find a pair of records that have a long shared prefix. In fact, this is one of the reasons we make sure to hash keys before using them as paths in our tree. If users were able to present hashes of keys to be inserted into the DB without having to provide the corresponding preimages (unhashed versions), then they could deliberately put values into the DB that cause very long proofs to be generated.
+However, since our hashes are 256 bits long, in the worst case scenario we would need 255 witnesses. This happens when all the bits in two keyHashes are the same except for the last one (if *all* the bits were the same with two distinct keys, then records might get overwritten and the data structure would simply be broken). Fortunately, it is computationally expensive to find long shared hash prefixes.
 
-But because of the hashing requirement, an adversary who wants to bloat the proof sizes needs to "mine" (using the bitcoin terminology)
+In fact, this is one of the reasons we make sure to hash keys before using them as paths in our tree. If users were able to present hashes of keys to be inserted into the DB without having to provide the corresponding preimages (unhashed versions), then they could deliberately put values into the DB that cause very long proofs to be generated (compare also to [DoS attacks based on hash collisions](https://lwn.net/Articles/474912/)).
 
+So why are we worried about deep trees and their correspondingly large proof sizes? The worst case overhead for proving a single value is around 8,000 bytes and a couple hundred calls to the hash function, which is of course trivial for modern networks and CPUs. The issue is that the proof size and computational overhead of verification is part of the security attack surface for some protocols. For instance, if in an [optimistic rollup](https://docs.ethhub.io/ethereum-roadmap/layer-2-scaling/optimistic_rollups/) system verifying a fraud proof requires more gas than is allowed in a single block, then an attacker can get away with fraudulent transactions. The best solution to this is to write gas-efficient verification code and to keep the fraud-proof units granular enough that even heavily bloated proofs can be verified with a reasonable amount of gas.
+
+For a point of reference regarding how expensive it is to bloat proof sizes, at the time of writing Bitcoin block hashes start with about 75 leading 0 bits. Generating one of these earns about US $70,000. Unfortunately, for our situation we could need to make a distinction. Bitcoin miners are specifically trying to generate block hashes with leading 0 bits (well, technically below a particular target value, but close enough). If somebody is trying to created bloated proofs, it may be sufficient to find *any* two keys with long hash prefixes. These attacks are easier because of the birthday effect, which is the observation that it's easier to find any two people with the same birthday than it is to find somebody with any specific birthday.
+
+Depending on the protocol though, there may be more value in generating partial collisions for particular keys. You can imagine an attacker specifically trying to bloat a victim key so as to cause annoyance or expense to people who verify this key frequently.
+
+One interesting consequence of the caching optimization that makes sparse merkle trees possible is that it is unnecessary to send the empty sub-tree witnesses along with a proof. One bit suffices to indicate whether a default hash should be used, or a provided witness. The nice thing about this is that finding a long shared keyHash prefix for two keys doesn't really bloat the proof that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works against us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). So summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (in the birthday attack case they might get this as a free side effect).
 
 
 
