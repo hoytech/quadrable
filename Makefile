@@ -18,7 +18,7 @@ DEPS       := $(CHECK_SRCS:.cpp=.d) $(TOOL_SRCS:.cpp=.d)
 
 .PHONY: phony
 
-all: phony quadb check
+all: phony verify-submodules quadb check
 
 check: $(CHECK_OBJS) $(DEPS)
 	$(CXX) $(CHECK_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
@@ -35,8 +35,19 @@ quadb.o: XCXXFLAGS += -DDOCOPT_HEADER_ONLY -DQUADRABLE_VERSION='"'`git describe 
 
 %.d: ;
 
+verify-submodules: phony | external/hoytech-cpp/README.md
+
+external/hoytech-cpp/README.md:
+	@echo
+	@echo "*** SUBMODULES NOT CHECKED OUT ***"
+	@echo "Run this command:"
+	@echo "  git submodule update --init"
+	@echo
+	@false
+
+
 clean: phony
-	rm -rf quadb check *.o *.d testdb/ *.gcda *.gcno coverage.lcov coverage-report/
+	rm -rf quadb check *.o external/hoytech-cpp/hex.o *.d testdb/ *.gcda *.gcno coverage.lcov coverage-report/
 
 run-check: phony check
 	mkdir -p testdb/
