@@ -186,7 +186,7 @@ In order to avoid this overhead, Quadrable uses another optimisation called *col
 
 An issue with collapsing leaves is that we could lose the ability to distinguish which of the leaves in the sub-tree is the non-empty one. We could not create proofs for these leaves since other people would not be able to detect if we had "moved around" the leaf within the sub-tree.
 
-In order to prevent this, Quadrable hashes the path information along with the leaf's value when computing a collapsed leaf's nodeHash:
+In order to prevent this, Quadrable hashes the path information (that is, the keyHash) along with the leaf's value when computing a collapsed leaf's nodeHash:
 
     leafNodeHash = H(H(key) || H(value) || '\0')
 
@@ -249,9 +249,9 @@ When you would like to query the database remotely, do the following steps:
 
 At this point you have a value, but you can't be sure that the result wasn't tampered with. Maybe John's balance is actually "$0.05", or perhaps there isn't a record for John Smith at all.
 
-In order to convince you that the record exists and is correct, the provider must send a proof along with the JSON. You can use this to proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. First compute the leaf hash. In Quadrable you do that by hashing the JSON value and combining it with the key's hash (see [collapsed leaves](#collapsed-leaves)).
+In order to convince you that the record exists and is correct, the provider must send a proof along with the JSON. You can use this proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. First compute the leaf hash. In Quadrable you do that by hashing the JSON value and combining it with the key's hash (see [collapsed leaves](#collapsed-leaves)).
 
-Next, you must compute the hash of the leaf's parent node. Unfortunately, to compute this you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This is solved by sending this value (called a *witness*) as part of the proof:
+Next, you must compute the hash of the leaf's parent node. To compute this you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This is solved by sending this value (called a *witness*) as part of the proof:
 
 ![](docs/proof2.svg)
 
@@ -283,7 +283,7 @@ After taking these observations into account, we see that if we are sending a co
 
 ![](docs/proof5.svg)
 
-By the way, consider the degenerate case of creating a proof for all of the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways. Also, nothing additional needs to be sent to satisfy non-inclusion proofs.
+By the way, consider the degenerate case of creating a proof for all of the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways. Also, nothing additional needs to be sent to prove that a record does not exist, since the verifier has the entire set.
 
 
 
@@ -321,7 +321,7 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data (although practically it's simpler to have 2 passes: a setup pass and a processing pass). They can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will result in a ready-to-use partial-tree.
 
-Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than values requested to be proven. This can happen when a proof constructor realises that a witness will reveal an empty sub-tree that is sufficient for satisfying a requested non-inclusion proof.
+Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than records requested to be proven. This can happen when a proof constructor realises that a witness will reveal an empty sub-tree that is sufficient for satisfying a requested non-inclusion proof.
 
 A Quadrable proof includes a list of strands, *sorted by the hashes of their keys*. Each strand contains the following:
 
@@ -374,7 +374,7 @@ Furthermore, a tree structure will be required in order to compute a new root af
 There are a variety of ways that proofs could be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialize this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
 * `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible, but the optimizer still has room for improvement.
-* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking).
+* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports [key enumeration](#key-tracking).
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
 
@@ -508,7 +508,7 @@ Internally there are several different types of nodes stored.
 
 * **Branches**: These are interior nodes that reference one or two children nodes. In the case where one of the nodes is an empty node, a branch left/right node is used. If the right child is empty, a branch left node is used, and vice versa. If neither are empty then a branch both node is used. Note that a branch implies that there are 2 or more leaves somewhere underneath this node, otherwise the branch node would be collapsed to a leaf or would be empty.
 * **Empty**: Empty nodes are not stored in the database, but instead are implicit children of branch left/right nodes.
-* **Leaf**: These are collapsed leaves, and contain enough information to satisfy get/put/del operations, and to be moved. A hash of the key is stored, but not the key itself. This is (optionally) stored in a [separate table](#key-tracking).
+* **Leaf**: These are collapsed leaves, and contain enough information to satisfy get/put/del operations. A hash of the key is stored, but not the key itself. This is (optionally) stored in a [separate table](#key-tracking).
 * **Witness** and **WitnessLeaf**: These are nodes that exist in partial-trees. A Witness node could be standing in for either a branch or a leaf, but a WitnessLeaf could only be a Leaf. The only difference between a WitnessLeaf and a Leaf is that the WitnessLeaf only stores a hash of the value, not the value itself. This means that it cannot be used to satisfy a get request. However, it still could be used for non-inclusion purposes, or for updating/deletion.
 
 ### Node layout in storage
