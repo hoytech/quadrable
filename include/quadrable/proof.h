@@ -258,7 +258,7 @@ static inline Proof decodeProof(std::string_view encoded) {
                 currPos -= 1 << (distance + 6);
             }
 
-            if (currPos > proof.strands.size()) { // rely on unsigned underflow to catch negative range
+            if (currPos >= proof.strands.size()) { // rely on unsigned underflow to catch negative range
                 throw quaderr("jumped outside of proof strands");
             }
         }
