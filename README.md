@@ -75,13 +75,13 @@ Quadrable is an authenticated multi-version embedded database. It is implemented
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
-* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with a cryptographic hash function to create a level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
+* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with calls to a cryptographic hash function, creating a smaller level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
 * *Binary*: The style of merkle tree used by Quadrable combines together exactly two nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that hashes of the database keys can correspond directly to each leaf's location in the tree.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that record keys can be hashed and used directly as each leaf's location in the tree.
 
 Values are authenticated by generating and importing proofs:
 
-* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of hashes as a proof. The value is hashed and then combined with this list in order to reconstruct the hashes of the intermediate nodes. If at the end of the list you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have a lot of space overhead due to duplicated hashes. Also, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
+* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of "witness" values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have a lot of space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
 * *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a partial-tree when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present.
 
 
@@ -319,9 +319,9 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 ![](docs/strands1.svg)
 
-Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data (although practically it's simpler to have 2 passes: a setup pass and a processing pass). They can be implemented efficiently in resource-constrained environments (such as smart contracts), and at the end will result in a ready-to-use partial-tree.
+Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data in resource-constrained environments such as smart contracts). After processing a proof, you end up with a ready-to-use partial-tree.
 
-Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than records requested to be proven. This can happen when a proof constructor realises that a witness will reveal an empty sub-tree that is sufficient for satisfying a requested non-inclusion proof.
+Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than records requested to be proven. This can happen when a witness reveals an empty sub-tree that is sufficient for satisfying a requested non-inclusion proof.
 
 A Quadrable proof includes a list of strands, *sorted by the hashes of their keys*. Each strand contains the following:
 
@@ -416,9 +416,9 @@ Here is how each strand is encoded:
 * A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is in base 128 with the most significant digit first using the fewest possible digits, and with the most significant bit set on all but the last digit.
 * The strand types are as follows:
   * `0`: Leaf (chosen to be 0 since this is probably the most common, and 0 bytes are cheaper in Ethereum calldata)
-  * `1`: WitnessLeaf
-  * `2`: WitnessEmpty
-  * `15`: Invalid
+  * `1`: Invalid
+  * `2`: WitnessLeaf
+  * `3`: WitnessEmpty
 
 The encoded commands are 1 byte each, and they do not correspond exactly with the commands described previously, although there is a straightforward conversion between the two. Here are the commands:
 

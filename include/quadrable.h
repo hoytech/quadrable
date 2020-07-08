@@ -149,9 +149,9 @@ using GetMultiQuery = std::map<std::string, GetMultiResult>;
 struct ProofStrand {
     enum class Type {
         Leaf = 0,
-        WitnessLeaf = 1,
-        WitnessEmpty = 2,
-        Invalid = 15,
+        Invalid = 1,
+        WitnessLeaf = 2,
+        WitnessEmpty = 3,
     } strandType;
     uint64_t depth;
     std::string keyHash;
@@ -179,6 +179,7 @@ struct Proof {
 
 
 
+// For internal DB-use only
 
 enum class NodeType {
     Empty = 0,
