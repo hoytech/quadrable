@@ -28,6 +28,7 @@ R"(
       quadb [options] get [--] <key>
       quadb [options] export [--sep=<sep>]
       quadb [options] import [--sep=<sep>]
+      quadb [options] root
       quadb [options] stats
       quadb [options] status
       quadb [options] diff <head> [--sep=<sep>]
@@ -276,6 +277,8 @@ void run(int argc, char **argv) {
             db.fork(txn);
             dbi_quadb_state.del(txn, "currHead");
         }
+    } else if (args["root"].asBool()) {
+        std::cout << to_hex(db.root(txn), true) << std::endl;
     } else if (args["stats"].asBool()) {
         quadrable::dumpStats(db, txn);
     } else if (args["status"].asBool()) {
