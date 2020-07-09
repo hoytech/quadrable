@@ -849,6 +849,37 @@ The `GarbageCollector` class can be used to deallocate unneeded nodes. See the i
 
 See the `README.md` file in [the solidity/ directory](https://github.com/hoytech/quadrable/tree/master/solidity) for details on how to run the test-suite.
 
+### Smart Contract Usage
+
+To validate a Quadrable proof in a smart contract, you need two items:
+
+* `bytes encodedProof` - This is a variable-length byte-array, as output by [quadb exportProof](#quadb-exportproof).
+* `bytes32 trustedRoot` - This is a hash of a root node from a trusted source (perhaps from storage, or provided by a trusted user).
+
+First import the proof with `Quadrable.importProof`. This creates a new tree and returns a memory address pointing to the root node:
+
+    uint256 rootNodeAddr = Quadrable.importProof(encodedProof);
+
+Use `Quadrable.getNodeHash` to retrieve the hash of this node and ensure that it is the same as the `trustedRoot`:
+
+    require(Quadrable.getNodeHash(rootNodeAddr) == trustedRoot, "proof invalid");
+
+Now that you have authenticated the partial tree created from the proof, you can begin to use it. First the key you are interested in must be hashed:
+
+    bytes32 keyHash = keccak256(abi.encodePacked("my key"));
+
+Now `Quadrable.get` can be called. It returns two items: `found` is a boolean indicating whether the key is present in the tree. If it is true, then `val` will contain the corresponding value for the provided key. If `found` is false, then `val` will be empty (0 length):
+
+    (bool found, bytes memory val) = Quadrable.get(rootNodeAddr, keyHash);
+
+Finally, you can modify the tree with `Quadrable.put`. It may return a new `rootNodeAddr`, which you should save:
+
+    rootNodeAddr = Quadrable.put(rootNodeAddr, keyHash, "new val");
+
+`Quadrable.getNodeHash` can be used to retrieve the updated root with your modifications:
+
+    bytes32 newTrustedRoot = Quadrable.getNodeHash(rootNodeAddr);
+
 
 ### Memory Layout
 
@@ -864,6 +895,9 @@ See the `README.md` file in [the solidity/ directory](https://github.com/hoytech
                 Witness: unused
                  Branch: [4 bytes: parentNodeAddr] [4 bytes: leftNodeAddr] [4 bytes: rightNodeAddr]
         bytes32 nodeHash
+
+
+
 
 
 ## Author and Copyright
