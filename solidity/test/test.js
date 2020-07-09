@@ -176,17 +176,79 @@ testSpecs.push({
 
 
 
-if (process.env.GAS_PROFILING) {
+if (process.env.GAS_USAGE) {
+    let firstRow = true;
+
     for (let n of [1, 10, 100, 1000, 10000, 100000, 1000000]) {
         testSpecs.push({
-            desc: `gas profiling: ${n} records in db`,
+            desc: `GAS_USAGE: ${n} records in db`,
+            gasUsageTest: true,
             data: makeData(n, i => [i+1, i+1]),
             inc: ['1'],
             put: [['1', '2']],
+
+            preAction: () => {
+                if (!firstRow) return;
+                firstRow = false;
+                console.error("\n\n\n");
+                console.error(`| DB Size | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |`);
+                console.error(`| --- | --- | --- | --- | --- | --- | --- |`);
+            },
             logGas: (r, proofSize) => {
                 let calldata = proofSize * 16;
                 let total = calldata + parseInt(r[0]) + parseInt(r[1]) + parseInt(r[2]);
                 console.error(`| ${n} | ${Math.round(Math.log2(n) * 10) / 10} | ${calldata} | ${r[0]} | ${r[1]} | ${r[2]} | ${total} |`);
+            },
+        });
+    }
+}
+
+if (process.env.GAS_USAGE) {
+    let dbSize = 1000000;
+    let avgDepth = Math.log2(dbSize);
+
+    let firstRow = true;
+
+    for (let n of [1, 2, 4, 8, 16, 32, 64, 128]) {
+        let keys = Array.from(Array(n).keys()).map(i => `${i+1}`);
+
+        testSpecs.push({
+            desc: `GAS_USAGE: ${n} strands`,
+            gasUsageTest: true,
+            data: makeData(dbSize, i => [i+1, i+1]),
+            inc: keys,
+            put: keys.map(k => [k, `${k} ${n}`]),
+
+            manualDbInit: true,
+            preAction: (quadb) => {
+                if (!firstRow) {
+                    quadb('fork --from gas-usage-strand-test');
+                    return;
+                }
+                firstRow = false;
+
+                quadb('checkout gas-usage-strand-test');
+
+                {
+                    let input = '';
+
+                    for (let i = 0; i < dbSize; i++) {
+                        input += `${i+1},${i+1}\n`;
+                    }
+
+                    quadb('import', { input, });
+                }
+
+                quadb('fork');
+
+                console.error("\n\n\n");
+                console.error(`| Num Strands | Approx Witnesses | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |`);
+                console.error(`| --- | --- | --- | --- | --- | --- | --- |`);
+            },
+            logGas: (r, proofSize) => {
+                let calldata = proofSize * 16;
+                let total = calldata + parseInt(r[0]) + parseInt(r[1]) + parseInt(r[2]);
+                console.error(`| ${n} | ${Math.round(n * avgDepth * 10) / 10} | ${calldata} | ${r[0]} | ${r[1]} | ${r[2]} | ${total} |`);
             },
         });
     }
@@ -213,6 +275,7 @@ describe("Quadrable Test Suite", function() {
     testSpecs = testSpecs.filter(s => !s.skip);
     if (origSpecsLen !== testSpecs.length) console.log("SKIPPING ONE OR MORE TESTS");
 
+    if (process.env.GAS_USAGE) testSpecs = testSpecs.filter(s => s.gasUsageTest);
 
 
     for (let spec of testSpecs) {
@@ -221,28 +284,37 @@ describe("Quadrable Test Suite", function() {
             const testHarness = await TestHarness.deploy();
             await testHarness.deployed();
 
-            child_process.execSync(`${quadb_cmd} checkout`);
+            let quadb = (cmd, opts) => {
+                if (!opts) opts = {};
+                return child_process.execSync(`${quadb_cmd} ${cmd}`, { ...opts, });
+            };
+
+            if (!spec.manualDbInit) quadb(`checkout`);
+            if (spec.preAction) spec.preAction(quadb);
 
             let rootHex, proofHex;
 
             let logGas = (res) => {
-                if (process.env.GAS_PROFILING) console.log("      GAS:", res[3].map(g => g.toNumber()));
+                if (process.env.GAS_USAGE) console.log("      GAS:", res[3].map(g => g.toNumber()));
                 if (spec.logGas) spec.logGas(res[3], proofHex.length - 2);
             };
 
             {
-                let input = '';
+                if (!spec.manualDbInit) {
+                    let input = '';
 
-                for (let key of Object.keys(spec.data)) {
-                    input += `${key},${spec.data[key]}\n`;
+                    for (let key of Object.keys(spec.data)) {
+                        input += `${key},${spec.data[key]}\n`;
+                    }
+
+                    quadb(`import`, { input, });
                 }
 
-                child_process.execSync(`${quadb_cmd} import`, { input, });
-                rootHex = child_process.execSync(`${quadb_cmd} root`).toString().trim();
+                rootHex = quadb(`root`).toString().trim();
 
                 let proofKeys = (spec.inc || []).concat(spec.non || []).join(' ');
 
-                proofHex = child_process.execSync(`${quadb_cmd} exportProof --hex -- ${proofKeys}`).toString().trim();
+                proofHex = quadb(`exportProof --hex -- ${proofKeys}`).toString().trim();
             }
 
             let updateKeys = [];
@@ -288,8 +360,8 @@ describe("Quadrable Test Suite", function() {
                     input += `${p[0]},${p[1]}\n`;
                 }
 
-                child_process.execSync(`${quadb_cmd} import`, { input, });
-                let newRootHex = child_process.execSync(`${quadb_cmd} root`).toString().trim();
+                quadb(`import`, { input, });
+                let newRootHex = quadb(`root`).toString().trim();
                 expect(res[2]).to.equal(newRootHex);
             }
         });
