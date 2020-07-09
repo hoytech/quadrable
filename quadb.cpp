@@ -103,13 +103,15 @@ void run(int argc, char **argv) {
         } else {
             throw quaderr("Could not access directory '", dbDir, "': ", strerror(errno));
         }
-    } else {
+    }
+
+    if (args["init"].asBool()) {
         std::string dbFile = dbDir + "data.mdb";
 
-        if (access(dbDir.c_str(), F_OK)) {
-            throw quaderr("Directory '", dbDir, "' not init'ed");
+        if (access(dbFile.c_str(), F_OK)) {
+            std::cout << "quadb: init'ing directory: " << dbDir << std::endl;
         } else {
-            if (args["init"].asBool()) throw quaderr("Directory '", dbDir, "' already init'ed");
+            std::cerr << "quadb: Directory '" << dbDir << "' already init'ed. Doing nothing." << std::endl;
         }
     }
 
@@ -153,7 +155,7 @@ void run(int argc, char **argv) {
 
 
     if (args["init"].asBool()) {
-        std::cout << "Quadrable directory init'ed: " << dbDir << std::endl;
+        // Do nothing
     } else if (args["dump-tree"].asBool()) {
         quadrable::dumpDb(db, txn);
     } else if (args["put"].asBool()) {
