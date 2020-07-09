@@ -67,21 +67,21 @@
 
 ## Introduction
 
-Quadrable is an authenticated multi-version database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. There are [C++](#c-library) and [Solidity](#solidity) libraries and a [command-line tool](#command-line) available.
+Quadrable is an authenticated multi-version database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. There are [C++](#c-library) and [Solidity](#solidity) libraries, as well as a git-like [command-line tool](#command-line).
 
-* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will generate a new root. Anyone who knows a root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides [proofs](#proofs) along with the responses, which are validated against the root.
-* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally and for many purposes.
+* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will result in a new root. Anyone who knows the root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides [proofs](#proofs) along with the responses, which are validated against the root.
+* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
-* *Merkle tree*: Each version of the database is represented by a [tree](#trees-and-exponential-growth). The leaves of this tree are the inserted records, and they are combined together with calls to a cryptographic hash function, creating a smaller level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
-* *Binary*: The style of merkle tree used by Quadrable combines together [exactly two](#keys) nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that record keys can be hashed and used directly as each leaf's location in the tree.
+* *Merkle tree*: Each version of the database is represented by a [tree](#trees-and-exponential-growth). The leaves of this tree are the inserted records, and they are combined together with calls to a cryptographic hash function, creating a smaller level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root node. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
+* *Binary*: The style of merkle tree used by Quadrable combines together [exactly two](#merkle-trees) nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) address-space. This means that record keys can be hashed and used directly as each leaf's location in the tree.
 
 Values are authenticated by generating and importing proofs:
 
-* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have a lot of space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
-* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a [partial-tree](#combined-proofs) when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present.
+* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have some space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
+* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a [partial-tree](#combined-proofs) when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present (or were proved to *not* be present).
 
 
 ## Building
@@ -105,11 +105,14 @@ You can run the tests like so:
 
     make test
 
-You can view a coverage report by running:
+* If you `make clean` prior to `make test` then a version of the `check` binary will be compiled with address sanitiser support.
+
+You can view a coverage report of the tests by running:
 
     make coverage
 
-You will need `lcov` installed. The report will be in this file: `quadrable/coverage-report/index.html`
+* You will need `lcov` installed.
+* The report will be in this file: `quadrable/coverage-report/index.html`
 
 
 
@@ -120,7 +123,7 @@ You will need `lcov` installed. The report will be in this file: `quadrable/cove
 
 ### Trees and Exponential Growth
 
-The reason we use trees is because of the exponential growth in the number of nodes as the depth is increased. The number of nodes that must be traversed to get to a leaf is related to the number of levels of the tree, which grows much slower than the number of nodes.
+The reason we use trees is because of the exponential growth in the number of nodes as the number of levels is increased. In other words, the number of intermediate nodes that must be traversed to get to a leaf grows much slower than the total number of nodes.
 
 In computer science trees are usually drawn as growing in the downwards direction, for some reason. Because of this, we'll use the term "depth" to refer to how many levels down you are from the top node (the "root").
 
@@ -138,7 +141,7 @@ The advantage of a merkle tree is that the nodeHash of the node at depth 0 (the 
 
 ### Keys
 
-In Quadrable's implementation of a merkle tree, keys are first hashed and then the bits these hashes are used to traverse the tree to find the locations where the values are stored. A `0` bit means to use the left child of a node, and a `1` bit means use the right child:
+In Quadrable's implementation of a merkle tree, keys are first hashed and then the bits of these hashes are used to traverse the tree to find the locations where the values are stored. A `0` bit means to use the left child of a node, and a `1` bit means use the right child:
 
 ![](docs/path.svg)
 
@@ -205,11 +208,11 @@ Since a collapsed leaf is occupying a spot high up in the tree that could potent
 
 ![](docs/split-leaf.svg)
 
-Sometimes splitting a leaf will result in more than one branches being added. This happens when the leaf being added shares additional prefix bits with the leaf being split. These extra intermediate branches each an have empty node as one of their children.
+Sometimes splitting a leaf will result in more than one branch being added. This happens when the leaf being added shares additional prefix bits with the leaf being split. These extra intermediate branches each an have empty node as one of their children.
 
 ![](docs/add-branch-empty.svg)
 
-Quadrable does not store empty nodes, so there are special [node types](#nodetype) to indicate if either of the children are empty sub-trees. These are the types of branch nodes:
+Quadrable does not store empty nodes. In the C++ implementation there are special [node types](#nodetype) to indicate if either of the children are empty sub-trees. These are the types of branch nodes:
 
 * Branch Left: The right node is empty.
 * Branch Right: The left node is empty.
@@ -265,7 +268,7 @@ Now you need to compute the next parent's hash, which requires another witness. 
 
 ### Combined Proofs
 
-The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes, usually in order from deepest to the root. To do the verification, it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root. The yellow nodes in the above diagrams are computed as part of verifying the proof.
+The previous section described the simple implementation of merkle tree proofs. The proof sent would be those 4 blue witness nodes, usually in order from deepest to the root since this is how they will be accessed. To do the verification, it's just a matter of concatenating (using the corresponding bit from the path to determine the order) and hashing until you get to the root. The yellow nodes in the above diagrams are computed as part of verifying the proof.
 
 This is pretty much as good as you can do with the proof for a single leaf (except perhaps to indicate empty sub-trees somehow so you don't need to send them along with the proof).
 
@@ -318,7 +321,7 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 ![](docs/strands1.svg)
 
-Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data in resource-constrained environments such as smart contracts). After processing a proof, you end up with a ready-to-use partial-tree.
+Quadrable's proof structure uses a concept of "strands". I'm not sure if this is the best way to formulate it, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass over the proof data in resource-constrained environments such as smart contracts. After processing a proof, you end up with a ready-to-use partial-tree.
 
 Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than records requested to be proven. This can happen when a witness reveals an empty sub-tree that is sufficient for satisfying a requested non-inclusion proof.
 
@@ -985,7 +988,7 @@ In general, the cost will be proportional to the number of witnesses in the proo
 
 For optimistic roll-up applications, these operations happen very infrequently so typical gas costs aren't the main concern. The bigger issue is the worst-case gas usage in an [adversarial environment](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that this cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then fraud can be committed.
 
-Let's assume that an attacker can create fully saturated paths for every element to be proven to a depth of 160. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. This suggests that -- for a very wide security margin -- fraud-proof systems should try to use 15 or fewer values for each unit of verification (assuming other gas costs are negligible).
+Let's assume that an attacker can create colliding keyHashes up to a depth of 160 for every element to be proven. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. This suggests that -- for a very wide security margin -- fraud-proof systems should try to use 15 or fewer values for each unit of verification (assuming other gas costs are negligible).
 
 
 ## Author and Copyright
