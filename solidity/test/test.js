@@ -184,7 +184,9 @@ if (process.env.GAS_PROFILING) {
             inc: ['1'],
             put: [['1', '2']],
             logGas: (r, proofSize) => {
-                console.error(`| ${n} | ${Math.round(Math.log2(n) * 10) / 10} | ${proofSize * 16} | ${r[0]} | ${r[1]} | ${r[2]} |`);
+                let calldata = proofSize * 16;
+                let total = calldata + parseInt(r[0]) + parseInt(r[1]) + parseInt(r[2]);
+                console.error(`| ${n} | ${Math.round(Math.log2(n) * 10) / 10} | ${calldata} | ${r[0]} | ${r[1]} | ${r[2]} | ${total} |`);
             },
         });
     }

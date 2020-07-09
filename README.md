@@ -47,7 +47,7 @@
   * [quadb exportProof](#quadb-exportproof)
   * [quadb importProof](#quadb-importproof)
   * [quadb mergeProof](#quadb-mergeproof)
-* [C++ Library](#c++-library)
+* [C++ Library](#c-library)
   * [LMDB Environment](#lmdb-environment)
   * [Encoding](#encoding)
   * [Heads](#heads)
@@ -67,7 +67,7 @@
 
 ## Introduction
 
-Quadrable is an authenticated multi-version database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. There are [C++](#c++-library) and [Solidity](#solidity) libraries and a [command-line tool](#command-line) available.
+Quadrable is an authenticated multi-version database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. There are [C++](#c-library) and [Solidity](#solidity) libraries and a [command-line tool](#command-line) available.
 
 * *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will generate a new root. Anyone who knows a root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides [proofs](#proofs) along with the responses, which are validated against the root.
 * *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally and for many purposes.
@@ -927,7 +927,7 @@ Finally, you can modify the tree with `Quadrable.put`. It may return a new `root
 
 See the [Strands](#strands) section for details on how the proof decoding algorithm works. The solidity implementation is similar to the C++ implementation, except that it does not decode the proof to an intermediate format prior to processing. Instead, it directly processes the encoded proof for efficiency reasons.
 
-We to be a little bit careful so as to support processing the proof in a single pass because the number of strands is not known in advance. Solidity does not support resizing dynamic memory arrays, so the function that parses the strands is careful to not allocate any memory. Instead, as it executes it builds up a contiguous array of strand elements. Each strand element contains a 32-byte strandState, a keyHash, and a node that will store the leaf for this strand (if any):
+Because the number of strands is not known in advance and Solidity does not support resizing dynamic memory arrays, the function that parses the strands is careful to not allocate any memory in order to support prcessing the proof in a single pass. Instead, as it executes it builds up a contiguous array of strand elements. Each strand element contains a 32-byte strandState, a keyHash, and a node that will store the leaf for this strand (if any):
 
     Strand element (128 bytes):
         uint256 strandState: [0 padding...] [1 byte: depth] [1 byte: merged] [4 bytes: next] [4 bytes: nodeAddr]
@@ -946,7 +946,7 @@ Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-by
                  Branch: [4 bytes: parentNodeAddr] [4 bytes: leftNodeAddr] [4 bytes: rightNodeAddr]
         bytes32 nodeHash
 
-The `parentNodeAddr` is only used as a temporary scratch area of memory during tree updates, to avoid recursion.
+* `parentNodeAddr` is only used as a temporary scratch area of memory during tree updates, to avoid recursion.
 
 
 
@@ -969,23 +969,23 @@ There are several variables than impact the gas usage of the library:
 * Proportion of inclusion versus non-inclusion proofs
 * Length of the values
 
-As a simple example to begin the discussion, here is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. One element is selected to be proven (inclusion proof). The proof size is recorded and this is used to estimate calldata costs (slightly too high, doesn't account for zero bytes). Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
+Following is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. One element is selected to be proven (an inclusion proof). The proof size is recorded and this is used to estimate calldata costs (slightly too high, doesn't account for zero bytes). Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
 
-| DB Size | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) |
-| --- | --- | --- | --- | --- | --- |
-| 1 | 0 | 1216 | 2722 | 1622 | 1693 |
-| 10 | 3.3 | 6368 | 8582 | 3651 | 8376 |
-| 100 | 6.6 | 7392 | 8848 | 3651 | 8377 |
-| 1000 | 10 | 11520 | 14014 | 5356 | 13977 |
-| 10000 | 13.3 | 14624 | 18887 | 7031 | 19518 |
-| 100000 | 16.6 | 19776 | 23401 | 8031 | 22830 |
-| 1000000 | 19.9 | 22848 | 25083 | 8697 | 25038 |
+| DB Size | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0 | 1216 | 2722 | 1622 | 1693 | 7253 |
+| 10 | 3.3 | 6368 | 8582 | 3651 | 8376 | 26977 |
+| 100 | 6.6 | 7392 | 8848 | 3651 | 8377 | 28268 |
+| 1000 | 10 | 11520 | 14014 | 5356 | 13977 | 44867 |
+| 10000 | 13.3 | 14624 | 18887 | 7031 | 19518 | 60060 |
+| 100000 | 16.6 | 19776 | 23401 | 8031 | 22830 | 74038 |
+| 1000000 | 19.9 | 22848 | 25083 | 8697 | 25038 | 81666 |
 
-In general, the cost will be proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiple it by 4000 (very rough estimate).
+In general, the cost will be proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiple it by 5000 (very rough estimate).
 
 For optimistic roll-up applications, these operations happen very infrequently so typical gas costs aren't the main concern. The bigger issue is the worst-case gas usage in an [adversarial environment](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that this cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then fraud can be committed.
 
-Let's assume that an attacker can create fully saturated paths for every element to be proven to a depth of 160. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 640k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 20 of these worst-case scenario values could be verified. This suggests that fraud-proof systems should try to use fewer than 20 values for each unit of verification.
+Let's assume that an attacker can create fully saturated paths for every element to be proven to a depth of 160. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. This suggests that -- for a very wide security margin -- fraud-proof systems should try to use 15 or fewer values for each unit of verification (assuming other gas costs are negligible).
 
 
 ## Author and Copyright
