@@ -45,7 +45,7 @@ for my $header (@$headers) {
 {
     open(my $ofh, '>', 'README.md.tmp') || die "unable to open README.md: $!";
 
-    $lines =~ s{<!-- TOC FOLLOWS -->}{<!-- TOC FOLLOWS -->\n<!-- START OF TOC -->\n$toc<!-- END OF TOC -->\n};
+    $lines =~ s{<!-- TOC FOLLOWS -->}{<!-- TOC FOLLOWS -->\n<!-- START OF TOC -->\n$toc<!-- END OF TOC -->};
 
     print $ofh $lines;
 }
@@ -66,5 +66,6 @@ sub title2link {
     my $title = shift;
     my $link = lc $title;
     $link =~ s/\s+/-/g;
+    $link =~ s/[+]//g;
     return $link;
 }
