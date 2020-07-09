@@ -349,11 +349,11 @@ The first thing the verifier should do is run some initial setup on each strand 
 * Hash the key (if key was included)
 * Compute the strand's nodeHash: If the record type is Leaf or WitnessLeaf, compute the leaf nodeHash. If Witness, then use the key hash directly for this
 * Set a `merged` boolean value to `false`
-* Set a `next` index value to `i+1` where `i` is the node's index in the list, or an empty sentinel for the last strand (for example, `-1`). This functions as a singly-linked list of unmerged strands
+* Set a `next` index value to `i+1` where `i` is the node's index in the list, or an empty sentinel for the last strand (for example `-1`, or the index immediately following the last strand's index). This functions as a singly-linked list of unmerged strands
 
 ### Commands
 
-In addition to the list of strands, a Quadrable proof includes a list of commands. These are instructions on how to process the strands. After running all the commands, all the strands will have been merged into one strand and the root will be reconstructed. Assuming this candidate root matches the trusted root, the proof is considered verified.
+In addition to the list of strands, a Quadrable proof includes a list of commands. These are instructions on how to process the strands. After running the commands, all the strands will have been merged into one strand and the root will be reconstructed. Assuming this candidate root matches the trusted root, the proof is considered verified.
 
 Every command specifies a strand by its index in the strand list. After running a command this strand's depth will decrease by 1.
 
@@ -373,33 +373,33 @@ After processing all commands, implementations should check the following:
 
 While processing commands, implementations should be creating nodes along the way for later querying. Technically this is optional and an implementation could just verify the root hash and then rely on the values included in the initial strand data. However, it is easier to make security-related mistakes with this approach. For example, suppose an implementation forgets to check that the first strand has an empty `next` linked list after processing the proof. In this case, an unauthenticated value could be in the initial strands that was never merged into the root. The tree-construction method "fails safe" in the presence of this mistake (among others) since this unauthenticated value will never get added to the created tree used for querying.
 
-Furthermore, a tree structure will be required in order to compute a new root after making modifications to these values, so in this case you may as well create a partial-tree while processing the proof. And if you do support building a partial-tree like this, any other handling of the strand values is duplicated code, which should be avoided.
+Furthermore, a tree structure will be useful when computing a new root after making insertions and updates. If you do support building a partial-tree to do this, any other handling of the strand values is duplicated code, which should be avoided. This implies that constructing the partial-tree while verifying the proof is ideal.
 
 
 
 ### Proof encodings
 
-There are a variety of ways that proofs could be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialize this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
+There are a variety of ways that merkle-tree proofs can be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialize this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
 * `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible, but the optimizer still has room for improvement.
-* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no keys version, but at the end you will have a partial-tree that supports [key enumeration](#key-tracking).
+* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no-keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking).
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate what encoding type is in use, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
 
-Although the C++ implementation has the `quadrable::Proof` intermediate representation of proofs which it converts encoded proofs into prior to processing, other implementations may choose to directly process the encoded form.
+Although the C++ implementation has the `quadrable::Proof` intermediate representation of proofs which it converts encoded proofs to and from prior to processing, the Solidity implementation directly processes the compact encoding.
 
 
 
 
 ### Compact encoding
 
-The first byte is the version byte described above, and then strands and commands are serialized:
+The first byte is the version byte described above, followed by serialised lists of strands and commands:
 
     [1 byte proof type]
     [ProofStrand]+
     [ProofCmd]*
 
-* The sort order is significant for both. For strands it must be sorted by key hash (even if keys are included, and not the keyHashes). For commands the order is the sequence that the commands will be processed.
+* The sort order is significant for both lists. For strands it must be sorted by keyHash (even with `CompactWithKeys` proofs where keys are included instead of keyHashes). For commands the order is the sequence that the commands will be processed.
 * At the end of the lists of strands, a special "Invalid" strand signifies the end of the strand list, and that the commands follow.
 * The commands are just processed until the end of the encoded string.
 
@@ -421,7 +421,7 @@ Here is how each strand is encoded:
     else if WitnessEmpty
       [32 byte keyHash]
 
-* A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is in base 128 with the most significant digit first using the fewest possible digits, and with the most significant bit set on all but the last digit.
+* A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is the base 128 integer with the fewest possible digits, most significant digit first, with the most significant bit set on all but the last digit.
 * The strand types are as follows:
   * `0`: Leaf (chosen to be 0 since this is probably the most common, and 0 bytes are cheaper in Ethereum calldata)
   * `1`: Invalid
@@ -442,11 +442,11 @@ The hashing details are 7 bits that indicate a sequence of either hashing with a
 * The witnesses are provided inline, that is they are the 32 bytes directly after the command byte. These 32 bytes are then skipped over and the next command is the following byte (unless more witnesses follow).
 * If all 7 bits in the hashing details are `0` (there is no marker bit) then the command says to merge this strand with the next unmerged strand (which can be found via the `next` linked list). In the `next` strand, `merged` is set to true and this strand is unlinked.
 
-The decoding algorithm keeps a variable that stores index into the strands. This is the current "working strand". The jump commands alter this index, so that subsequent hashing commands can work on other strands.
+The decoding algorithm keeps a variable that stores an index into the strands. This is the current "working strand". The jump commands alter this index, so that subsequent hashing commands can work on other strands.
 
 * The initial value of the working strand is the *last* (right-most) strand. This was an arbitrary choice, but usually the strands are worked on starting at the right, because left strands survive longer (the left-most one always becomes the final strand).
 * The short jumps simply add one to the 5 bit distance and add or subtract this from the working strand
-* The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows an implementation to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
+* The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows a proof to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
 * Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap" around, which could allow some clever encoding-time optimisations, especially if the number of strands is relatively prime with 2, but the added complexity didn't seem worth it.
 
 
@@ -459,9 +459,9 @@ However, since our hashes are 256 bits long, in the worst case scenario we would
 
 In fact, this is one of the reasons we make sure to hash keys before using them as paths in our tree. If users were able to present hashes of keys to be inserted into the DB without having to provide the corresponding preimages (unhashed versions), then they could deliberately put values into the DB that cause very long proofs to be generated (compare also to [DoS attacks based on hash collisions](https://lwn.net/Articles/474912/)).
 
-If keys can only be selected by trusted parties, then it may make sense to use special non-hash values for keys, which could considerably reduce proof sizes if values commonly requested together are given adjacent keys. Quadrable does not yet support this, but it would be a trivial modification.
+If keys can only be selected by trusted parties, then it may make sense to use special non-hash values for keys. This could considerably reduce proof overhead if values commonly requested together are given adjacent keys. Quadrable does not yet support this, but it would be a trivial modification.
 
-So why are we worried about deep trees and their correspondingly large proof sizes? The worst case overhead for proving a single value is around 8,000 bytes and a couple hundred calls to the hash function, which is of course trivial for modern networks and CPUs. The issue is that the proof size and computational overhead of verification is part of the security attack surface for some protocols. For instance, if in an [optimistic rollup](https://docs.ethhub.io/ethereum-roadmap/layer-2-scaling/optimistic_rollups/) system verifying a fraud proof requires more gas than is allowed in a single block, then an attacker can get away with fraudulent transactions. The best solution to this is to keep the fraud-proof units granular enough that even heavily bloated proofs can be verified with a [reasonable amount of gas](#gas-usage). Counter-intuitively, this also means it is important for verification code to be gas-efficient, even if it is expected to never be called during normal operation of the protocol.
+So why are we worried about deep trees and their correspondingly larger proof sizes? The worst case overhead for proving a single value is around 8,000 bytes and a couple hundred calls to the hash function, which is of course trivial for modern networks and CPUs. The issue is that the proof size and computational overhead of verification is part of the security attack surface for some protocols. For instance, if in an [optimistic rollup](https://docs.ethhub.io/ethereum-roadmap/layer-2-scaling/optimistic_rollups/) system verifying a fraud proof requires more gas than is allowed in a single block, then an attacker can get away with fraudulent transactions. The best solution to this is to keep the fraud-proof units granular enough that even heavily bloated proofs can be verified with a [reasonable amount of gas](#gas-usage). Counter-intuitively, this also means it is important for verification code to be gas-efficient, even if it is expected to rarely be called during normal operation of the protocol.
 
 For a point of reference regarding how expensive it is to bloat proof sizes, at the time of writing Bitcoin block hashes start with about 75 leading 0 bits. Generating one of these earns about US $70,000. Unfortunately, for our situation we need to make a distinction. Bitcoin miners are specifically trying to generate block hashes with leading 0 bits (well, technically below a particular target value, but close enough). If somebody is trying to created bloated proofs, it may be sufficient to find *any* two keys with long hash prefixes. These attacks are easier because of the birthday effect, which is the observation that it's easier to find any two people with the same birthday than it is to find somebody with a specific birthday.
 
@@ -469,7 +469,7 @@ Depending on the protocol though, there may be more value in generating partial 
 
 There is a `quadb mineHash` command to help brute force search for a key who has a specific hash prefix. This is useful when writing tests for Quadrable, so that you can build up the exact tree you need.
 
-One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send the empty sub-tree witnesses along with a proof. One bit suffices to indicate whether a provided witness should be used, or a default hash is sufficient. The nice thing about this is that finding a long shared keyHash prefix for two keys doesn't really bloat the proof that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). So summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (in the birthday attack case they might get this as a free side effect).
+One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send empty sub-tree witnesses along with a proof. A single bit suffices to indicate whether a provided witness should be used, or a default hash instead. The nice thing about this is that finding a single long shared keyHash prefix for two keys doesn't really bloat the proof size that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). So summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (and in the birthday attack case they might get this as a free side effect).
 
 
 
@@ -479,7 +479,7 @@ One interesting consequence of the [caching optimisation](#sparseness) that make
 
 ### Copy-On-Write
 
-In the diagrams in above it shows nodes in the tree being modified during an update. This makes it easier to explain what is happening, but is not actually how the data structure is stored. To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
+In the diagrams above it shows nodes in the tree being modified during an update. This makes it easier to explain what is happening, but is not actually how the C++ implementation stores its data. To support multiple-versions of the tree, nodes are never modified. Instead, new nodes are added as needed, and they point to the old nodes in the places where the trees are identical.
 
 In particular, when a leaf is added/modified, all of the branches on the way back up to the root need to be recreated. To illustrate this, here is the example from the [splitting leaves section](#splitting-leaves), but showing all the nodes that needed to be created (green), and how these nodes point back into the original tree (dotted lines):
 
@@ -496,21 +496,21 @@ Since leaves are never deleted during an update, they can continue to exist in t
 
 Because traversing Quadrable's tree data-structure requires reading many small records, and these reads cannot be parallelised or pipelined, it is very important to be able to read records quickly and efficiently.
 
-Quadrable uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
+Quadrable's C++ implementation uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
 
-LMDB is a B-tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB that are commonly used for merkle tree storage. Compared to LevelDB, LMDB has radically better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers ACID transactions and multi-process concurrency (in addition to multi-thread), and is less likely to suffer data corruption.
+LMDB is a B-tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB. Compared to LevelDB, LMDB has radically better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers real ACID transactions and multi-process access (in addition to multi-thread), and is less likely to suffer data corruption.
 
 LMDB supports multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a single transaction), and because our nodes are more granular than LMDB's B-tree pages.
 
 ### nodeId
 
-Some implementations of hash trees store leaves and nodes in a database, keyed by the node's hash. This has the nice property that records are automatically de-duplicated. Since a collision-resistant hash function is used, if two values have the same hash they can be assumed to be identical. This is called [content-addressable storage](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects).
+Some implementations of hash trees store leaves and nodes in a database keyed by the node's hash. This has the nice property that records are automatically de-duplicated. Since a collision-resistant hash function is used, if two values have the same hash they can be assumed to be identical. This is called [content-addressable storage](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects).
 
 Quadrable does not do this. Instead, every time a node is added, a numeric incrementing `nodeId` is allocated and the node is stored with this key. Although records are not de-duplicated, there are several advantages to this scheme:
 
 * Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, the top few levels of nodes in a tree are likely to reside in the same B-tree page.
-* When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree, since nodeIds are never reused.
-* Intermediate nodes don't store the hashes of their two children nodes, but instead just the nodeIds. This means they only occupy 8+8 bytes, rather than 32+32.
+* When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree. Since nodeIds are never reused, nobody could've "grabbed it back".
+* Intermediate nodes don't store the hashes of their two children nodes, but instead just the nodeIds. This means these references occupy 8*2 bytes, rather than 32*2.
 
 ### nodeType
 
@@ -551,45 +551,47 @@ Without key tracking, you cannot enumerate keys, because the database doesn't st
     $ quadb export
     H(?)=0x1c8aff950685...,world
 
-It is slightly more efficient to not store keys in the database, so for large databases where enumeration is not needed, it might be advisable.
+This output indicates that the value is known, as well as the hash of the key, but not the key itself.
+
+It is slightly more efficient to not store keys in the database, so this should be done for large databases where enumeration is not necessary.
 
 
 
 
 ## Command-line
 
-The `quadb` command can be used to interact with a Quadrable database. It is very roughly modeled after `git`, so it requires sub-commands to activate its various functions. You can run `quadb` with no arguments to see a short help summary and a list of the available sub-commands.
+The `quadb` command can be used to interact with a Quadrable database. It is loosely modeled after `git`, so it requires sub-commands to activate its various functions. You can run `quadb` with no arguments to see a short help summary and a list of the available sub-commands.
 
 ### quadb init
 
 Before you can use other commands, you must initialise a directory to contain the Quadrable database. By default it inits `./quadb-dir/`:
 
     $ quadb init
-    Quadrable directory init'ed: ./quadb-dir/
+    quadb: init'ing directory: ./quadb-dir/
 
 You can specify an alternate directory with the `--db` flag:
 
     $ quadb --db=$HOME/.quadrable init
-    Quadrable directory init'ed: /home/doug/.quadrable/
+    quadb: init'ing directory: /home/doug/.quadrable/
 
 Or the `QUADB_DIR` environment variable:
 
     $ QUADB_DIR=/path/to/quadrable quadb init
-    Quadrable directory init'ed: /path/to/quadrable
+    quadb: init'ing directory: /path/to/quadrable
 
 ### quadb status
 
-The status command shows you some basic information about your current database tree:
+The status command shows some basic information about your current database tree:
 
-    $ quadb init
+    $ quadb status
     Head: master
     Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
-*Head* is like your current branch in git, and can be thought of as a symbolic link that is updated to point to the latest version of the tree as it is modified. The default head is `master`. Quadrable doesn't call these links "branches" because it has a concept of branches internally, and this would confuse the code too much.
+*Head* is like your current branch in git, and can be thought of as a symbolic link that is updated to point to the latest version of the tree as it is modified. The default head is `master`. Quadrable doesn't call these links "branches" because it has a separate concept of branches, and reusing this term would confuse the code too much.
 
 *Root* is the hash of the root node in your database. Provided the hash function is cryptographically secure, this is a globally unique identifier for the current state of the tree pointed to by your head. For an empty tree, [a special all-zero value](#sparseness) is used.
 
-The number in parentheses after the root hash is the [nodeId](#nodeid). This is an internal value used by Quadrable and is shown here for informational purposes only.
+The number in parentheses after the root hash is the [nodeId](#nodeid). This is an internal value used by Quadrable and is shown for informational purposes only.
 
 ### quadb put
 
@@ -633,9 +635,11 @@ This is an important property of Quadrable: Identical trees have identical roots
 
 If you wish to insert multiple records into the DB, running `quadb put` multiple times is inefficient. This is because each time it is run it will need to create new intermediate nodes and discard the previously created ones.
 
-A better way to do it is to use `quadb import` which can put multiple records with a single traversal of the tree. This command reads comma-separated `key,value` pairs from standard input, one per line. The separator can be changed with the `--sep` option. On success there is no output:
+A better way to do it is to use `quadb import` which can put multiple records with [a single traversal](#operation-batching) of the tree. This command reads comma-separated `key,value` pairs from standard input, one per line. The separator can be changed with the `--sep` option. On success there is no output:
 
     $ perl -E 'for $i (1..1000) { say "key $i,value $i" }' | quadb import
+
+* Because of the key/value separator (default `,`) and the newline record separator, you should only use `quadb import` (and `quadb export`) for datasets with restricted key/value characters. For example, if a record contains a command or a newline, the output would be corrupted. This restriction only applies to the command-line tool: When using the libraries directly there are no restrictions on [character encoding](#character-encoding).
 
 ### quadb export
 
@@ -649,7 +653,7 @@ This is the complement to `quadb import`. It dumps the contents of the database 
     key 459,value 459
     ...
 
-Note that the output is *not* sorted by the key. It is sorted by the hash of the key, because that is the way records are stored in the tree (see the section on [proof bloating](#proof-bloating)). You can pipe this output to the `sort` command if you would like it sorted by key.
+Note that the output is *not* sorted by the key. It is sorted by the hash of the key, because that is the way records are stored in the tree. You can pipe this output to the `sort` command if you would like it sorted by key.
 
 ### quadb head
 
@@ -699,6 +703,21 @@ If no head name is passed in to `quadb fork`, it will fork to a [detached head](
 
 `quadb fork` can optionally take `--from` flag which represents the head to be forked from, instead of using the current head.
 
+### quadb stats
+
+This command traverses the your current head and prints a basic summary of its contents:
+
+    $ quadb stats
+    numNodes:        2442
+    numLeafNodes:    1000
+    numBranchNodes:  1442
+    numWitnessNodes: 0
+    maxDepth:        21
+    numBytes:        140565
+
+Don't confuse this command with [quadb status](#quadb-status).
+
+
 ### quadb diff
 
 You can view the differences between the head you have checked out and another branch with `quadb diff`. If the heads are equivalent, there will be no output:
@@ -706,7 +725,7 @@ You can view the differences between the head you have checked out and another b
     $ quadb diff temp
     $
 
-Let's add a new key, delete an existing one from our current branch, and run `diff` again:
+Let's add a new key, delete an existing one from our current branch, then run `diff` again:
 
     $ quadb put new test
     $ quadb del tempKey
@@ -729,7 +748,7 @@ This command accepts a diff on standard input, and applies it to the current hea
 
 ### quadb exportProof
 
-This command constructs an encoded proof for the supplied keys against the current head, and then prints it to standard output:
+This command constructs an encoded proof for the supplied keys against the current head, and then prints it to standard output. Here we are generating a hexadecimal proof for two values, `key1` and `no such key`:
 
     $ quadb exportProof --hex -- key1 "no such key"
     0x0000030e42f327ee3cfa7ccfc084a0bb68d05eb627610303012a67afbf1ecd9b0d32fa0568656c6c6f0201b5553de315e0edf504d9150af82dafa5c4667fa618ed0a6f19c69b41166c55100b42b6393c1f53060fe3ddbfcd7aadcca894465a5a438f69c87d790b2299b9b201a030ffe62a3cecb0c0557a8f4c2d648c7407bb5e90e2bd490e97e3447a0d4c081b7400
@@ -737,7 +756,7 @@ This command constructs an encoded proof for the supplied keys against the curre
 * The list of keys to prove should be provided as arguments. They can be keys that exist in the database (in which case their values are embedded into the proof), or keys that don't (in which case a non-inclusion proof is sent).
 * The default [proof encoding](#proof-encodings) is `CompactNoKeys`, but this can be changed with `--format`.
 * `--hex` causes the output to be in hexadecimal (with a `0x` prefix). By default raw binary data will be printed.
-* The example above puts the keys after `--`. This is in case a key begins with `-` it won't be interpreted as a switch.
+* The example above puts the keys after `--`. This is in case you have a key beginning with `-` it won't be interpreted as an option.
 * `--dump` prints a human-readable version of the proof (pre-encoding). This can be helpful for debugging.
 
 ### quadb importProof
@@ -752,7 +771,7 @@ If the proof is stored in a file `my-proof`, import it like this:
 
     $ quadb importProof --hex < my-proof
 
-The tree can now be read from and updated as usual, as long as no records that weren't part of the proof are accessed. Proofs can also be exported from this tree.
+The tree can now be read from and updated as usual, as long as no records that weren't part of the proof are accessed (in which case errors will be thrown). Proofs can also be exported *from* this partial-tree.
 
 * `--hex` must be used if the proof is in hexadecimal.
 * [Enumeration by key](#key-tracking) is only possible if the `CompactWithKeys` proof encoding was specified.
@@ -765,7 +784,7 @@ After importing a proof, if you receive additional proofs against the same datab
 
 * If the roots of the new proof differs from the root of your current head, and error will be thrown and the head will not be modified.
 * On success, queries/updates/proofs can access any of the records in either proof.
-
+* `--hex` must be used if the proof is in hexadecimal.
 
 
 
@@ -786,7 +805,7 @@ Here is an example of how to setup the LMDB environment and create a Quadrable `
 
     lmdb::env lmdb_env = lmdb::env::create();
     lmdb_env.set_max_dbs(64);
-    lmdb_env.set_mapsize(1UL * 1024UL * 1024UL * 1024UL * 1024UL);
+    lmdb_env.set_mapsize(1UL * 1024UL * 1024UL * 1024UL * 1024UL); // 1 TB
     lmdb_env.open("/path/to/quadrable-dir", MDB_CREATE, 0664);
     lmdb_env.reader_check();
 
@@ -804,12 +823,13 @@ Here is an example of how to setup the LMDB environment and create a Quadrable `
 * Set `trackKeys` to `true` if you want to keep a record of the keys, so you can do things like `export` in the `quaddb` application. For some applications, enumerating keys is not necessary so it is disabled by default for efficiency reasons.
 * `db.init()` must be called in a write transaction, at least the first time the environment is accessed. This is so that it can setup the necessary LMDB tables.
 
+For a complete example, see the `quadb.cpp` file.
 
-### Encoding
+### Character Encoding
 
 Quadrable allows arbitrary byte strings as either keys or values. There are no restrictions on character encodings, or included 0 bytes.
 
-Keys and values can be arbitrarily long, with the one exception that the empty string is not allowed as a key.
+Keys and values can be arbitrarily long, with the exception that the empty string is not allowed as a key.
 
 Although in the `quadb` application some values are presented in hexadecimal encoding, the Quadrable library itself does not use hexadecimal at all. You may find it convenient to use the `to_hex` and `from_hex` utilities used by `quadb` and the test-suite:
 
@@ -817,6 +837,7 @@ Although in the `quadb` application some values are presented in hexadecimal enc
     using hoytech::to_hex;
     using hoytech::from_hex;
 
+When using the `quadb` command-line tool, care should be taken to ensure that keys/values don't embed certain characters, as described in [quadb import](#quadb-import).
 
 
 ### Heads
@@ -829,13 +850,13 @@ Note that the command-line application stores its currently checked out head inf
 * `db.getHead()`: Returns the current head checked out, or throws an exception if it's a detached head.
 * `db.root(txn)`: Returns the root of the current tree.
 * `db.checkout()`: Changes the current head to another (either existing, new, or detached).
-* `db.fork()`: Copies the current head to another (either overwriting, new, or detached).
+* `db.fork(txn)`: Copies the current head to another (either overwriting, new, or detached).
 
 
 
 ### Operation Batching
 
-The Quadrable library is designed so that all operations can be batched.
+The Quadrable C++ library allows all operations to be batched.
 
 #### Batched Updates
 
@@ -876,7 +897,7 @@ Use the following to avoid unnecessary tree traversals:
     auto recs = db.get(txn, { "key1", "key2", });
     if (recs["key1"].exists) std::cout << recs["key1"].val;
 
-**Important**: In both of the above cases, the values are `string_view`s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort. If you need to keep them around longer, copy them into a string:
+**Important**: In both of the above cases, the values are [string_view](https://github.com/hoytech/lmdbxx#string_view)s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort (whichever comes first). If you need to keep a value around longer, put it into a string, which copies the data to your program's heap:
 
     std::string key1ValCopy(recs["key1"].val);
 
@@ -899,7 +920,7 @@ Since using blockchain storage from a smart contract is very expensive, Quadrabl
 
 ### Smart Contract Usage
 
-First, copy the `Quadrable.sol` file into your project's `contracts` directory, and `import` it:
+First, copy the `Quadrable.sol` file into your project's `contracts/` directory, and import it:
 
     import "./Quadrable.sol";
 
@@ -908,11 +929,11 @@ To validate a Quadrable proof in a smart contract, you need two items:
 * `bytes encodedProof` - This is a variable-length byte-array, as output by [quadb exportProof](#quadb-exportproof) (must be `CompactNoKeys` encoding).
 * `bytes32 trustedRoot` - This is a hash of a root node from a trusted source (perhaps from storage, or provided by a trusted user).
 
-Once you have these, load the proof into memory with `Quadrable.importProof`. This creates a new tree and returns a memory address pointing to the root node:
+Once you have these, load the proof into memory with `Quadrable.importProof()`. This creates a new tree and returns a memory address pointing to the root node:
 
     uint256 rootNodeAddr = Quadrable.importProof(encodedProof);
 
-Use `Quadrable.getNodeHash` to retrieve the hash of this node and ensure that it is the same as the `trustedRoot`:
+Use `Quadrable.getNodeHash()` to retrieve the hash of this node and ensure that it is the same as the `trustedRoot`:
 
     require(Quadrable.getNodeHash(rootNodeAddr) == trustedRoot, "proof invalid");
 
@@ -920,15 +941,17 @@ Now that you have authenticated the partial tree created from the proof, you can
 
     bytes32 keyHash = keccak256(abi.encodePacked("my key"));
 
-Now `Quadrable.get` can be called. It returns two items: `found` is a boolean indicating whether the key is present in the tree. If it is true, then `val` will contain the corresponding value for the provided key. If `found` is false, then `val` will be empty (0 length):
+`Quadrable.get()` can be called to lookup values. It returns two items: `found` is a boolean indicating whether the key is present in the tree. If it is true, then `val` will contain the corresponding value for the provided key. If `found` is false, then `val` will be empty (0 length):
 
     (bool found, bytes memory val) = Quadrable.get(rootNodeAddr, keyHash);
 
-Finally, you can modify the tree with `Quadrable.put`. It may return a new `rootNodeAddr`, which you should save:
+If you need to access a value multiple times, it is preferable to store the result in memory so you don't need to call `Quadrable.get()` multiple times (which is [expensive](#gas-usage)).
+
+Finally, you can modify the tree with `Quadrable.put()`. This will return a new `rootNodeAddr`, which you should save:
 
     rootNodeAddr = Quadrable.put(rootNodeAddr, keyHash, "new val");
 
-`Quadrable.getNodeHash` can be used to retrieve the updated root incorporating your modifications:
+`Quadrable.getNodeHash()` can be used to retrieve the updated root incorporating your modifications:
 
     bytes32 newTrustedRoot = Quadrable.getNodeHash(rootNodeAddr);
 
@@ -938,7 +961,7 @@ Finally, you can modify the tree with `Quadrable.put`. It may return a new `root
 
 See the [Strands](#strands) section for details on how the proof decoding algorithm works. The solidity implementation is similar to the C++ implementation, except that it does not decode the proof to an intermediate format prior to processing. Instead, it directly processes the encoded proof for efficiency reasons.
 
-Because the number of strands is not known in advance and Solidity does not support resizing dynamic memory arrays, the function that parses the strands is careful to not allocate any memory in order to support prcessing the proof in a single pass. Instead, as it executes it builds up a contiguous array of strand elements. Each strand element contains a 32-byte strandState, a keyHash, and a node that will store the leaf for this strand (if any):
+Because the number of strands is not known in advance and Solidity does not support resizing dynamic memory arrays, the function that parses the strands is careful to not allocate any memory in order to support processing the proof in a single pass. As it executes it builds up a contiguous array of strand elements. Each strand element contains a 32-byte strandState, a keyHash, and a node that will store the leaf for this strand (if any):
 
     Strand element (128 bytes):
         uint256 strandState: [0 padding...] [1 byte: depth] [1 byte: merged] [4 bytes: next] [4 bytes: nodeAddr]
@@ -957,11 +980,11 @@ Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-by
                  Branch: [4 bytes: parentNodeAddr] [4 bytes: leftNodeAddr] [4 bytes: rightNodeAddr]
         bytes32 nodeHash
 
-* `parentNodeAddr` is only used as a temporary scratch area of memory during tree updates, to avoid recursion.
+* `parentNodeAddr` is not maintained as an invariant: It is only used as a temporary scratch memory area during tree updates, to avoid recursion.
 
 
 
-### Limitations
+### Limitations of Solidity Implementation
 
 * Only the `CompactNoKeys` proof encoding is supported. This means that enumeration by key is not possible.
 * Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string).
@@ -976,12 +999,12 @@ Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-by
 There are several variables than impact the gas usage of the library:
 
 * Size of the database and distribution of its keys
-* Number of elements to be proven
+* Number of records to be proven
 * Distribution of *their* keys
 * Proportion of inclusion versus non-inclusion proofs
-* Length of the values
+* Length of values
 
-Following is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. One element is selected to be proven (an inclusion proof). The proof size is recorded and this is used to estimate calldata costs. Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
+Following is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. A single element is selected to be proven (an inclusion proof). The proof size is recorded and this is used to estimate calldata costs. Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
 
 | DB Size (N) | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1011,11 +1034,11 @@ Now consider the following test. Here we have setup a DB with 1 million records 
 
 * The number of witnesses is roughly the number of strands times the average depth of the tree (fixed at 19.9). This estimate is slightly high because it doesn't account for the witnesses omited due to [combined proofs](#combined-proofs). Better proxies for this estimate are proof size or (equivalently) calldata gas: Observe that when the number of strands doubles, the calldata gas less than doubles. This effect will become more pronounced with smaller DB sizes or larger number of strands.
 
-In general, the gas cost is proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiple it by 5000 (very rough estimate). The gas cost technically isn't linear, since (among other things) the cost of memory increases quadratically, but this estimate seems to hold for reasonable parameter sizes.
+In general, the gas cost is proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiple it by 5000 (very rough estimate). The gas cost technically isn't linear, since (among other things) the cost of EVM memory increases quadratically, but this estimate seems to hold for reasonable parameter sizes.
 
-For optimistic roll-up applications, proofs only need to be supplied in the case a fraudulent action is detected. If the system is well designed, then game-theoretically the frequency of this should be "never". Because of this, typical gas costs aren't the primary concern. The bigger issue is the worst-case gas usage in an [adversarial environment](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that it cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then there is an opportunity for fraud to be committed.
+For optimistic roll-up applications, proofs only need to be supplied in the case a fraudulent action is detected. If the system is well designed, then game-theoretically the frequency of this should be "never". Because of this, typical gas costs aren't the primary concern. The bigger issue is the worst-case gas usage in the presence of [adversarially selected keys](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that it cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then there is an opportunity for fraud to be committed.
 
-Let's assume that an attacker can create colliding keyHashes up to a depth of 160 for every element to be proven. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. In order to leave a very wide security margin, this suggests that fraud-proof systems should try to use 15 or fewer values for each unit of verification (assuming other gas costs are negligible).
+Let's assume that an attacker can create colliding keyHashes up to a depth of 160 for every element to be proven. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. In order to leave a very wide security margin, this suggests that fraud-proof systems should try to use under 15 values for each unit of verification (assuming other gas costs are negligible).
 
 
 ## Author and Copyright
