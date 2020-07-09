@@ -155,7 +155,7 @@ Keys are hashed for multiple reasons:
 
 ### Sparseness
 
-Obviously creating a full tree with 2<sup>256</sup> possible key paths is impossible. Fortunately, there is [an optimization](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
+Obviously creating a full tree with 2<sup>256</sup> possible key paths is impossible. Fortunately, there is [an optimisation](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this absurd number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
 
 By caching the value of an empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them when needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
 
@@ -172,14 +172,14 @@ The purpose of these changes is to make empty sub-trees at all depths have 32 ze
 
 * All zero roots are user-friendly: It's easy to recognize an empty tree.
 * A run of zeros will compress better, so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
-* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimizations. Specifically, 0 bytes in the calldata is cheaper on gas, contract code size is reduced, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a very naive implementation would store the cached empty values in storage as opposed to contract code.
+* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimisations. Specifically, 0 bytes in the calldata is cheaper on gas, contract code size is reduced, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a very naive implementation would store the cached empty values in storage as opposed to contract code.
 
 
 ### Collapsed Leaves
 
 Although using the sparseness optimisation described above makes it feasible to simulate a binary tree with a depth of 256, it still would require us to traverse 256 nodes to get to a leaf. Adding a new leaf would require calling the hash function 256 times and creating 256 new nodes.
 
-In order to avoid this overhead, Quadrable uses another optimisation called *collapsed leaves*. In this case, whenever a sub-tree contains exactly one non-empty leaf node (implying all the others are empty), this sub-tree is not stored or computed. Instead, only the non-empty leaf is stored. If the leaf is collapsed at depth N, then only N intermediate nodes need to be traversed to get to it from the root.
+In order to reduce this overhead, Quadrable uses another optimisation called *collapsed leaves*. In this case, whenever a sub-tree contains exactly one non-empty leaf node (implying all the others are empty), this sub-tree is not stored or computed. Instead, only the non-empty leaf is stored. If the leaf is collapsed at depth N, then only N intermediate nodes need to be traversed to get to it from the root.
 
 ![](docs/collapsed-leaves.svg)
 
@@ -194,17 +194,19 @@ In order to prevent this, Quadrable hashes the path information (that is, the ke
 
 * The hashed key is 32 bytes and represents the path from the root to the leaf.
 * The hashed value is also 32 bytes, and represents the value stored in this leaf.
-* `'\0'` is a single null byte (see below).
+* `'\0'` is a single zero byte (see below).
 
 There are two reasons for using the hash of the value rather than the value itself:
 
-* For [non-inclusion proofs](#non-inclusion-proofs) it is sometimes necessary to send a leaf along with the proof to show that a different leaf lies along the path where the queried leaf exists. In this case, where the verifier doesn't care about the contents of this "witness leaf", we can just include the hash of the value in the proof, which could potentially be much smaller than the full value. Note that the verifier still has enough information to move this witness leaf around in their partial-tree.
-* Combined with the null byte, this ensures the input when hashing a leaf is always 65 bytes long. By contrast, the input when hashing two nodeHashes to get the parent's nodeHash is always 64 bytes. This achieves a domain separation so that leaves cannot be reinterpreted as interior nodes, nor vice versa.
+* For [non-inclusion proofs](#non-inclusion-proofs) it is sometimes necessary to send a leaf along with the proof to show that a different leaf lies along the path where the queried leaf exists. In this case, where the verifier doesn't care about the contents of this "witness leaf", we can just include the hash of the value in the proof, which could potentially be much smaller than the full value. Note that the verifier still has enough information to move this witness leaf around in a partial-tree, allowing it to be split or bubbled (see next sections).
+* Combined with the zero byte, this ensures the input when hashing a leaf is always 65 bytes long. By contrast, the input when hashing two nodeHashes to get the parent's nodeHash is always 64 bytes. This achieves a domain separation so that leaves can not be reinterpreted as interior nodes, nor vice versa.
 
 
 ### Splitting Leaves
 
 Since a collapsed leaf is occupying a spot high up in the tree that could potentially be in the way of new leaves with the same key prefix, during an insertion it is sometimes necessary to "split" a collapsed leaf. A new branch node will be added in place of the collapsed leaf, and both leaves will be inserted further down underneath this branch. 
+
+In this figure, the leaf being split is coloured blue and the newly added nodes are green:
 
 ![](docs/split-leaf.svg)
 
@@ -235,17 +237,21 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 So far the data-structure we've described is just an expensive way to store a tree of data. The reason why we're doing all this hashing in the first place is so that we can create *proofs* about the contents of our tree.
 
-A proof is a record from the tree along with enough information for somebody who does not have a copy of the tree to reconstruct the root of the tree. This reconstructed root can then be compared with a version of the root acquired elsewhere, from a trusted source. Imagine that the root is published daily in a newspaper, or is embedded in a blockchain.
+A proof is a record from the tree along with enough information for somebody who does not have a copy of the tree to reconstruct the root. This reconstructed root can then be compared with a version of the root acquired elsewhere, from a trusted source. Some possible trusted ways to transmit a trusted root are:
 
-The purpose of using a tree structure is so that the information required in a proof is proportional to the depth of the tree, and not the total number of nodes.
+* Published in a newspaper
+* Broadcast from a satellite
+* Embedded in a blockchain
+
+The purpose of using a tree structure is so that the size a proof is proportional to the depth of the tree, and not the total number of leaves.
 
 ### Proofs and witnesses
 
 When you would like to query the database remotely, do the following steps:
 
-* Acquire a copy of the root hash (32 bytes) from some trusted source.
+* Acquire a copy of the root hash (32 bytes) from a trusted source.
 * Hash the key of the record you would like to search for. Let's say you're looking for the record `"John Smith"` and it hashes to `1011` in binary (using a 4-bit hash for sake of explanation, normally this would be 256 bits). This is the path that will be used to traverse the tree to this record.
-* Ask a provider who has the full data-set available to send you the value for the record that has this hash. Suppose they send you a JSON blob like `{"name":"John Smith","balance":"$200",...}`.
+* Ask a (potentially untrusted) provider who has the full data-set available to send you the value for the record that has this hash. Suppose they send you a JSON blob like `{"name":"John Smith","balance":"$200",...}`.
 
 ![](docs/proof1.svg)
 
@@ -262,8 +268,8 @@ Now you need to compute the next parent's hash, which requires another witness. 
 ![](docs/proof3.svg)
 
 * Whether the witness is the left child or the right child depends on the value of the path at that level. If it is a `1` then the witness is on the left, since the value is stored underneath the right node (and vice versa). You can think of a witness as a sub-tree that you don't care about, so you just need a summarised value that covers all of the nodes underneath it.
-* There is a witness for every level of the tree. Since Quadrable uses collapsed leaves, this will be less than the full bit-length of the hash. [If we can assume](#proof-bloating) hashes are randomly distributed, then this will be roughly log2(N): That is, if there are a million items in the DB there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in witnesses relative to nodes illustrates the beauty of trees and logarithmic growth).
-* The final computed hash is called the "candidate root". If this matches the trusted root, then the proof was successful and we have verified the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
+* There is a witness for every level of the tree. Since Quadrable uses collapsed leaves, this will be less than the full bit-length of the hash. [If we can assume](#proof-bloating) hashes are randomly distributed, then this will be roughly log<sub>2</sub>(N): That is, if there are a million items in the DB there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in witnesses relative to nodes illustrates the beauty of trees and logarithmic growth).
+* The final computed hash is called the "candidate" root. If this matches the trusted root, then the proof was successful and we have verified the JSON value is accurate. It is helpful to consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
 
 
 ### Combined Proofs
@@ -272,11 +278,11 @@ The previous section described the simple implementation of merkle tree proofs. 
 
 This is pretty much as good as you can do with the proof for a single leaf (except perhaps to indicate empty sub-trees somehow so you don't need to send them along with the proof).
 
-However, suppose we want to prove multiple values at the same time. Trivially, we could request separate proofs for each of them. Here are the two proofs for different leaves:
+However, suppose we want to prove multiple values at the same time. Trivially, we could request separate proofs for each of them. Here are two proofs for different leaves:
 
 ![](docs/proof4.svg)
 
-To prove both of these values independently, the proofs would need 8 witnesses in total. However, observe the following:
+To prove both of these values independently, the proofs need 8 witnesses in total. However, observe the following:
 
 * Since we are authenticating values from the same tree, the top 2 witnesses will be the same, and are therefore redundant.
 * On the third level, the node that was sent as a witness in one proof is a computed node in the other proof, and vice versa. Since the verifier is going to be computing these values anyway, there is no need for the proof to contain *any* witnesses for this level.
@@ -285,7 +291,7 @@ After taking these observations into account, we see that if we are sending a co
 
 ![](docs/proof5.svg)
 
-By the way, consider the degenerate case of creating a proof for all of the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways. Also, nothing additional needs to be sent to prove that a record does not exist, since the verifier has the entire set.
+By the way, consider the degenerate case of creating a proof for all of the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways. Also, nothing additional needs to be sent to prove that a record does not exist, since the verifier has the entire set and can just check to see that it is not present.
 
 
 
@@ -441,7 +447,7 @@ The decoding algorithm keeps a variable that stores index into the strands. This
 * The initial value of the working strand is the *last* (right-most) strand. This was an arbitrary choice, but usually the strands are worked on starting at the right, because left strands survive longer (the left-most one always becomes the final strand).
 * The short jumps simply add one to the 5 bit distance and add or subtract this from the working strand
 * The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows an implementation to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
-* Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap" around, which could allow some clever encoding-time optimizations, especially if the number of strands is relatively prime with 2, but the added complexity didn't seem worth it.
+* Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap" around, which could allow some clever encoding-time optimisations, especially if the number of strands is relatively prime with 2, but the added complexity didn't seem worth it.
 
 
 
@@ -463,7 +469,7 @@ Depending on the protocol though, there may be more value in generating partial 
 
 There is a `quadb mineHash` command to help brute force search for a key who has a specific hash prefix. This is useful when writing tests for Quadrable, so that you can build up the exact tree you need.
 
-One interesting consequence of the [caching optimization](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send the empty sub-tree witnesses along with a proof. One bit suffices to indicate whether a provided witness should be used, or a default hash is sufficient. The nice thing about this is that finding a long shared keyHash prefix for two keys doesn't really bloat the proof that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). So summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (in the birthday attack case they might get this as a free side effect).
+One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send the empty sub-tree witnesses along with a proof. One bit suffices to indicate whether a provided witness should be used, or a default hash is sufficient. The nice thing about this is that finding a long shared keyHash prefix for two keys doesn't really bloat the proof that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). So summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (in the birthday attack case they might get this as a free side effect).
 
 
 

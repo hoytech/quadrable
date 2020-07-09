@@ -290,6 +290,21 @@
          transform="scale(-0.6)"
          inkscape:connector-curvature="0" />
     </marker>
+    <marker
+       inkscape:stockid="Arrow2Mend"
+       orient="auto"
+       refY="0"
+       refX="0"
+       id="Arrow2Mend-75"
+       style="overflow:visible"
+       inkscape:isstock="true">
+      <path
+         id="path4151-8"
+         style="fill:#000000;fill-opacity:1;fill-rule:evenodd;stroke:#000000;stroke-width:0.625;stroke-linejoin:round;stroke-opacity:1"
+         d="M 8.7185878,4.0337352 -2.2072895,0.01601326 8.7185884,-4.0017078 c -1.7454984,2.3720609 -1.7354408,5.6174519 -6e-7,8.035443 z"
+         transform="scale(-0.6)"
+         inkscape:connector-curvature="0" />
+    </marker>
   </defs>
   <sodipodi:namedview
      id="base"
@@ -386,7 +401,7 @@
          y="55.680214"
          style="stroke-width:0.15227576">branch</tspan></text>
     <rect
-       style="fill:none;fill-opacity:1;stroke:#000000;stroke-width:0.662696;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+       style="fill:#00ffff;fill-opacity:1;stroke:#000000;stroke-width:0.662696;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
        id="rect823-8-3-1"
        width="24.9737"
        height="9.9186335"
@@ -698,14 +713,14 @@
     <text
        xml:space="preserve"
        style="font-style:normal;font-weight:normal;font-size:5.0731535px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.12682883"
-       x="82.636772"
+       x="76.815933"
        y="71.945869"
        id="text37558-2"><tspan
          sodipodi:role="line"
          id="tspan37556-7"
-         x="82.636772"
+         x="76.815933"
          y="71.945869"
-         style="stroke-width:0.12682883">witness</tspan></text>
+         style="stroke-width:0.12682883">witnesses</tspan></text>
     <text
        xml:space="preserve"
        style="font-style:normal;font-weight:normal;font-size:5.0731535px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.12682883"
@@ -738,6 +753,12 @@
        style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker-end:url(#Arrow2Mend-4-4)"
        d="m 196.54483,40.94816 -9.15797,11.503358"
        id="path37586-1-0"
+       inkscape:connector-curvature="0"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:none;fill-opacity:1;stroke:#000000;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker-end:url(#Arrow2Mend-75)"
+       d="m 103.15598,71.589798 c 15.97334,-8.30979 37.78334,-12.683231 75.31971,-6.450512"
+       id="path37586-70"
        inkscape:connector-curvature="0"
        sodipodi:nodetypes="cc" />
   </g>
