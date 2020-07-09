@@ -59,15 +59,9 @@
   * [Smart Contract Usage](#smart-contract-usage)
   * [Memory Layout](#memory-layout)
   * [Limitations](#limitations)
-  * [Gas Costs](#gas-costs)
+  * [Gas Usage](#gas-usage)
 * [Author and Copyright](#author-and-copyright)
 <!-- END OF TOC -->
-
-
-
-
-
-
 
 
 
@@ -75,19 +69,19 @@
 
 Quadrable is an authenticated multi-version database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. There are [C++](#c++-library) and [Solidity](#solidity) libraries and a [command-line tool](#command-line) available.
 
-* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will generate a new root. Anyone who knows a root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides "proofs" along with the responses, which are validated against the root.
-* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This "copy-on-write" behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally and for many purposes.
+* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will generate a new root. Anyone who knows a root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides [proofs](#proofs) along with the responses, which are validated against the root.
+* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally and for many purposes.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
-* *Merkle tree*: Each version of the database is represented by a tree. The leaves of this tree are the inserted records, and they are combined together with calls to a cryptographic hash function, creating a smaller level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
-* *Binary*: The style of merkle tree used by Quadrable combines together exactly two nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a sparse merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that record keys can be hashed and used directly as each leaf's location in the tree.
+* *Merkle tree*: Each version of the database is represented by a [tree](#trees-and-exponential-growth). The leaves of this tree are the inserted records, and they are combined together with calls to a cryptographic hash function, creating a smaller level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
+* *Binary*: The style of merkle tree used by Quadrable combines together [exactly two](#keys) nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) leaf location. This means that record keys can be hashed and used directly as each leaf's location in the tree.
 
 Values are authenticated by generating and importing proofs:
 
-* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of "witness" values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have a lot of space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
-* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a partial-tree when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present.
+* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have a lot of space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
+* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a [partial-tree](#combined-proofs) when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present.
 
 
 ## Building
@@ -456,15 +450,17 @@ However, since our hashes are 256 bits long, in the worst case scenario we would
 
 In fact, this is one of the reasons we make sure to hash keys before using them as paths in our tree. If users were able to present hashes of keys to be inserted into the DB without having to provide the corresponding preimages (unhashed versions), then they could deliberately put values into the DB that cause very long proofs to be generated (compare also to [DoS attacks based on hash collisions](https://lwn.net/Articles/474912/)).
 
-So why are we worried about deep trees and their correspondingly large proof sizes? The worst case overhead for proving a single value is around 8,000 bytes and a couple hundred calls to the hash function, which is of course trivial for modern networks and CPUs. The issue is that the proof size and computational overhead of verification is part of the security attack surface for some protocols. For instance, if in an [optimistic rollup](https://docs.ethhub.io/ethereum-roadmap/layer-2-scaling/optimistic_rollups/) system verifying a fraud proof requires more gas than is allowed in a single block, then an attacker can get away with fraudulent transactions. The best solution to this is to keep the fraud-proof units granular enough that even heavily bloated proofs can be verified with a reasonable amount of gas. Counter-intuitively, this also means it is important for verification code to be gas-efficient, even if it is expected to never be called during normal operation of the protocol.
+If keys can only be selected by trusted parties, then it may make sense to use special non-hash values for keys, which could considerably reduce proof sizes if values commonly requested together are given adjacent keys. Quadrable does not yet support this, but it would be a trivial modification.
 
-For a point of reference regarding how expensive it is to bloat proof sizes, at the time of writing Bitcoin block hashes start with about 75 leading 0 bits. Generating one of these earns about US $70,000. Unfortunately, for our situation we could need to make a distinction. Bitcoin miners are specifically trying to generate block hashes with leading 0 bits (well, technically below a particular target value, but close enough). If somebody is trying to created bloated proofs, it may be sufficient to find *any* two keys with long hash prefixes. These attacks are easier because of the birthday effect, which is the observation that it's easier to find any two people with the same birthday than it is to find somebody with any specific birthday.
+So why are we worried about deep trees and their correspondingly large proof sizes? The worst case overhead for proving a single value is around 8,000 bytes and a couple hundred calls to the hash function, which is of course trivial for modern networks and CPUs. The issue is that the proof size and computational overhead of verification is part of the security attack surface for some protocols. For instance, if in an [optimistic rollup](https://docs.ethhub.io/ethereum-roadmap/layer-2-scaling/optimistic_rollups/) system verifying a fraud proof requires more gas than is allowed in a single block, then an attacker can get away with fraudulent transactions. The best solution to this is to keep the fraud-proof units granular enough that even heavily bloated proofs can be verified with a [reasonable amount of gas](#gas-usage). Counter-intuitively, this also means it is important for verification code to be gas-efficient, even if it is expected to never be called during normal operation of the protocol.
+
+For a point of reference regarding how expensive it is to bloat proof sizes, at the time of writing Bitcoin block hashes start with about 75 leading 0 bits. Generating one of these earns about US $70,000. Unfortunately, for our situation we need to make a distinction. Bitcoin miners are specifically trying to generate block hashes with leading 0 bits (well, technically below a particular target value, but close enough). If somebody is trying to created bloated proofs, it may be sufficient to find *any* two keys with long hash prefixes. These attacks are easier because of the birthday effect, which is the observation that it's easier to find any two people with the same birthday than it is to find somebody with a specific birthday.
 
 Depending on the protocol though, there may be more value in generating partial collisions for particular keys. You can imagine an attacker specifically trying to bloat a victim key so as to cause annoyance or expense to people who verify this key frequently.
 
 There is a `quadb mineHash` command to help brute force search for a key who has a specific hash prefix. This is useful when writing tests for Quadrable, so that you can build up the exact tree you need.
 
-One interesting consequence of the caching optimization that makes sparse merkle trees possible is that it is unnecessary to send the empty sub-tree witnesses along with a proof. One bit suffices to indicate whether a default hash should be used, or a provided witness. The nice thing about this is that finding a long shared keyHash prefix for two keys doesn't really bloat the proof that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works against us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). So summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (in the birthday attack case they might get this as a free side effect).
+One interesting consequence of the [caching optimization](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send the empty sub-tree witnesses along with a proof. One bit suffices to indicate whether a provided witness should be used, or a default hash is sufficient. The nice thing about this is that finding a long shared keyHash prefix for two keys doesn't really bloat the proof that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). So summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (in the birthday attack case they might get this as a free side effect).
 
 
 
@@ -714,21 +710,42 @@ This command accepts a diff on standard input, and applies it to the current hea
 
 ### quadb exportProof
 
-FIXME
+This command constructs an encoded proof for the supplied keys against the current head, and then prints it to standard output:
+
+    $ quadb exportProof --hex -- key1 "no such key"
+    0x0000030e42f327ee3cfa7ccfc084a0bb68d05eb627610303012a67afbf1ecd9b0d32fa0568656c6c6f0201b5553de315e0edf504d9150af82dafa5c4667fa618ed0a6f19c69b41166c55100b42b6393c1f53060fe3ddbfcd7aadcca894465a5a438f69c87d790b2299b9b201a030ffe62a3cecb0c0557a8f4c2d648c7407bb5e90e2bd490e97e3447a0d4c081b7400
+
+* The list of keys to prove should be provided as arguments. They can be keys that exist in the database (in which case their values are embedded into the proof), or keys that don't (in which case a non-inclusion proof is sent).
+* The default [proof encoding](#proof-encodings) is `CompactNoKeys`, but this can be changed with `--format`.
+* `--hex` causes the output to be in hexadecimal (with a `0x` prefix). By default raw binary data will be printed.
+* The example above puts the keys after `--`. This is in case a key begins with `-` it won't be interpreted as a switch.
+* `--dump` prints a human-readable version of the proof (pre-encoding). This can be helpful for debugging.
 
 ### quadb importProof
 
-FIXME
+This is the opposite of `exportProof`. It takes the encoded proof and uses it to create a new partial tree.
+
+The current head must be the empty tree (all 0 bytes):
+
+    $ quadb checkout new-partial-tree
+
+If the proof is stored in a file `my-proof`, import it like this:
+
+    $ quadb importProof --hex < my-proof
+
+The tree can now be read from and updated as usual, as long as no records that weren't part of the proof are accessed. Proofs can also be exported from this tree.
+
+* `--hex` must be used if the proof is in hexadecimal.
+* [Enumeration by key](#key-tracking) is only possible if the `CompactWithKeys` proof encoding was specified.
 
 ### quadb mergeProof
 
-FIXME
+After importing a proof, if you receive additional proofs against the same database (meaning it has the same root), you can merge these proofs in too:
 
+    $ quadb mergeProof --hex < my-proof2
 
-
-
-
-
+* If the roots of the new proof differs from the root of your current head, and error will be thrown and the head will not be modified.
+* On success, queries/updates/proofs can access any of the records in either proof.
 
 
 
@@ -931,10 +948,10 @@ The `parentNodeAddr` is only used as a temporary scratch area of memory during t
 * Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string).
 * The Solidity implementation does *not* use [copy-on-write](#copy-on-write), so multiple versions of the tree can not exist simultaneously. Instead, the tree is updated in-place during modifications (nodes are reused when possible). This is done to limit the amount of memory consumed.
 * Proofs cannot be created by the Solidity implementation. This should not be necessary for most use-cases.
-* Large proofs can have [excessive gas costs](#gas-costs).
+* Large proofs can have [excessive gas costs](#gas-usage).
 
 
-### Gas Costs
+### Gas Usage
 
 
 
