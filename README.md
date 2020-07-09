@@ -845,6 +845,25 @@ The `GarbageCollector` class can be used to deallocate unneeded nodes. See the i
 * When you are done marking nodes, call `gc.sweep()`. This must be done inside a read-write transaction. All nodes that weren't found during the mark phase are deleted.
 
 
+## Solidity
+
+See the `README.md` file in [the solidity/ directory](https://github.com/hoytech/quadrable/tree/master/solidity) for details on how to run the test-suite.
+
+
+### Memory Layout
+
+    Strand state (128 bytes):
+        uint256: [0 padding...] [1 byte: depth] [1 byte: merged] [4 bytes: next] [4 bytes: nodeAddr]
+        [32 bytes: keyHash]
+        [64 bytes: possibly containing leaf node for this strand]
+
+    Node (64 bytes):
+        uint256 nodeContents: [0 padding...] [nodeType specific (see below)] [1 byte: nodeType]
+                   Leaf: [4 bytes: valAddr] [4 bytes: valLen] [4 bytes: keyHashAddr]
+            WitnessLeaf: [4 bytes: keyHashAddr]
+                Witness: unused
+                 Branch: [4 bytes: parentNodeAddr] [4 bytes: leftNodeAddr] [4 bytes: rightNodeAddr]
+        bytes32 nodeHash
 
 
 ## Author and Copyright
