@@ -36,7 +36,7 @@ R"(
       quadb [options] head
       quadb [options] head rm [<head>]
       quadb [options] checkout [<head>]
-      quadb [options] fork [<head>] [<from>]
+      quadb [options] fork [<head>] [--from=<from>]
       quadb [options] gc
       quadb [options] exportProof [--format=(noKeys|withKeys)] [--hex] [--dump] [--] <keys>...
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
@@ -266,7 +266,7 @@ void run(int argc, char **argv) {
             dbi_quadb_state.del(txn, "currHead");
         }
     } else if (args["fork"].asBool()) {
-        if (args["<from>"]) db.checkout(args["<from>"].asString());
+        if (args["--from"]) db.checkout(args["--from"].asString());
 
         if (args["<head>"]) {
             std::string newHead = args["<head>"].asString();

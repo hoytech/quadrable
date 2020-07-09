@@ -689,7 +689,9 @@ Our new `temp2` head starts off with the same root as `temp`. We can now modify 
 
 Although semantically `quadb fork` acts like it copies the tree pointed to by the current head, no copying actually occurs. In fact, the two trees share the same structure so forking is a very inexpensive operation. Cheap database snapshots is an important feature of Quadrable, and is useful for a variety of tasks.
 
-`quadb fork` can take a second argument which represents the head to be copied from, instead of using the current head. Or it can take no arguments, in which case the current head is forked to a [detached head](#heads).
+If no head name is passed in to `quadb fork`, it will fork to a [detached head](#heads).
+
+`quadb fork` can optionally take `--from` flag which represents the head to be forked from, instead of using the current head.
 
 ### quadb diff
 
