@@ -1,2 +1,3 @@
 - branch/node building/access/updates is messy
 - possible optimization: only pack/unpack strand state after jumping
+- inline mloadUint8/mloadUint32, and reduce their require overhead?
