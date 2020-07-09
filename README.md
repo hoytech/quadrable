@@ -533,8 +533,16 @@ The meaning of the remaining bytes depend on the nodeType:
 
 ### Key tracking
 
-FIXME
+Quadrable can run in two modes: with key-tracking enabled or disabled. By default, the C++ library has it disabled, but the `quadb` tool enables it (unless provided the `--noTrackKeys` option or the `QUADB_NOTRACKKEYS` environment variable).
 
+Without key tracking, you cannot enumerate keys, because the database doesn't store them. It only stores the hashes. This has an effect on commands like `quadb export`:
+
+    $ quadb checkout
+    $ quadb --noTrackKeys put hello world
+    $ quadb export
+    H(?)=0x1c8aff950685...,world
+
+It is slightly more efficient to not store keys in the database, so for large databases where enumeration is not needed, it might be advisable.
 
 
 
@@ -953,6 +961,15 @@ The `parentNodeAddr` is only used as a temporary scratch area of memory during t
 
 ### Gas Usage
 
+| DB Size | Average Depth | Import (gas) | Query (gas) | Update (gas) |
+| --- | --- | --- | --- | --- |
+| 1 | 0 | 2722 | 1622 | 1693 |
+| 10 | 3.3 | 8582 | 3651 | 8376 |
+| 100 | 6.6 | 8848 | 3651 | 8377 |
+| 1000 | 10 | 14014 | 5356 | 13977 |
+| 10000 | 13.3 | 18887 | 7031 | 19518 |
+| 100000 | 16.6 | 23401 | 8031 | 22830 |
+| 1000000 | 19.9 | 25083 | 8697 | 25038 |
 
 
 

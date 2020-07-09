@@ -183,6 +183,9 @@ if (process.env.GAS_PROFILING) {
             data: makeData(n, i => [i+1, i+1]),
             inc: ['1'],
             put: [['1', '2']],
+            logGas: r => {
+                console.error(`| ${n} | ${Math.round(Math.log2(n) * 10) / 10} | ${r[0]} | ${r[1]} | ${r[2]} |`);
+            },
         });
     }
 }
@@ -209,12 +212,13 @@ describe("Quadrable Test Suite", function() {
     if (origSpecsLen !== testSpecs.length) console.log("SKIPPING ONE OR MORE TESTS");
 
 
-    let logGas = (res) => {
-        if (process.env.GAS_PROFILING) console.log("      GAS:", res[3].map(g => g.toNumber()));
-    };
-
 
     for (let spec of testSpecs) {
+        let logGas = (res) => {
+            if (process.env.GAS_PROFILING) console.log("      GAS:", res[3].map(g => g.toNumber()));
+            if (spec.logGas) spec.logGas(res[3]);
+        };
+
         it(spec.desc, async function() {
             const TestHarness = await ethers.getContractFactory("TestHarness");
             const testHarness = await TestHarness.deploy();
