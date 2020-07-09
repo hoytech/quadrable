@@ -972,6 +972,7 @@ There are several variables than impact the gas usage of the library:
 As a simple example to begin the discussion, here is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. One element is selected to be proven (inclusion proof). The proof size is recorded and this is used to estimate calldata costs (slightly too high, doesn't account for zero bytes). Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
 
 | DB Size | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) |
+| --- | --- | --- | --- | --- | --- |
 | 1 | 0 | 1216 | 2722 | 1622 | 1693 |
 | 10 | 3.3 | 6368 | 8582 | 3651 | 8376 |
 | 100 | 6.6 | 7392 | 8848 | 3651 | 8377 |
