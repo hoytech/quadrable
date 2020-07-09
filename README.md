@@ -55,6 +55,11 @@
     * [Batched Updates](#batched-updates)
     * [Batched Gets](#batched-gets)
   * [Garbage Collection](#garbage-collection)
+* [Solidity](#solidity)
+  * [Smart Contract Usage](#smart-contract-usage)
+  * [Memory Layout](#memory-layout)
+  * [Limitations](#limitations)
+  * [Gas Costs](#gas-costs)
 * [Author and Copyright](#author-and-copyright)
 <!-- END OF TOC -->
 
@@ -65,13 +70,13 @@
 
 
 
+
 ## Introduction
 
-Quadrable is an authenticated multi-version embedded database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs.
+Quadrable is an authenticated multi-version database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. There are [C++](#c++-library) and [Solidity](#solidity) libraries and a [command-line tool](#command-line) available.
 
 * *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will generate a new root. Anyone who knows a root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides "proofs" along with the responses, which are validated against the root.
 * *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This "copy-on-write" behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally and for many purposes.
-* *Embedded*: Quadrable's main functionality is in a C++ header-only library that is intended to be used by applications such as the `quadb` command-line tool. For persistent storage, it uses [LMDB](https://symas.com/lmdb/), an efficient database library that embeds the backing storage into your process by memory-mapping a file.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
@@ -733,6 +738,8 @@ FIXME
 
 ## C++ Library
 
+Quadrable's main functionality is implemented as a C++ header-only library that is intended to be used by applications such as the `quadb` command-line tool.
+
 ### LMDB Environment
 
 Quadrable uses the [lmdbxx C++ bindings for LMDB](https://github.com/hoytech/lmdbxx) so consult its documentation as needed.
@@ -847,16 +854,25 @@ The `GarbageCollector` class can be used to deallocate unneeded nodes. See the i
 
 ## Solidity
 
-See the `README.md` file in [the solidity/ directory](https://github.com/hoytech/quadrable/tree/master/solidity) for details on how to run the test-suite.
+In addition to the C++ library, there is also a [Solidity](https://solidity.readthedocs.io/en/v0.6.11/) implementation. Solidity is a programming language for implementing smart contracts on the Ethereum blockchain.
+
+See the `README.md` file in [the solidity/ directory](https://github.com/hoytech/quadrable/tree/master/solidity) for details on how to compile and test the library.
+
+Since using blockchain storage from a smart contract is very expensive, Quadrable does not require it. In fact, avoiding storage is one of the primary reasons you might use Quadrable: An authenticated data-structure allows a smart contract to perform read and write operations on a large data-set, even if that data-set does not exist in the blockchain state at all.
+
 
 ### Smart Contract Usage
 
+First, copy the `Quadrable.sol` file into your project's `contracts` directory, and `import` it:
+
+    import "./Quadrable.sol";
+
 To validate a Quadrable proof in a smart contract, you need two items:
 
-* `bytes encodedProof` - This is a variable-length byte-array, as output by [quadb exportProof](#quadb-exportproof).
+* `bytes encodedProof` - This is a variable-length byte-array, as output by [quadb exportProof](#quadb-exportproof) (must be `CompactNoKeys` encoding).
 * `bytes32 trustedRoot` - This is a hash of a root node from a trusted source (perhaps from storage, or provided by a trusted user).
 
-First import the proof with `Quadrable.importProof`. This creates a new tree and returns a memory address pointing to the root node:
+Once you have these, load the proof into memory with `Quadrable.importProof`. This creates a new tree and returns a memory address pointing to the root node:
 
     uint256 rootNodeAddr = Quadrable.importProof(encodedProof);
 
@@ -876,17 +892,26 @@ Finally, you can modify the tree with `Quadrable.put`. It may return a new `root
 
     rootNodeAddr = Quadrable.put(rootNodeAddr, keyHash, "new val");
 
-`Quadrable.getNodeHash` can be used to retrieve the updated root with your modifications:
+`Quadrable.getNodeHash` can be used to retrieve the updated root incorporating your modifications:
 
     bytes32 newTrustedRoot = Quadrable.getNodeHash(rootNodeAddr);
 
 
+
 ### Memory Layout
 
-    Strand state (128 bytes):
-        uint256: [0 padding...] [1 byte: depth] [1 byte: merged] [4 bytes: next] [4 bytes: nodeAddr]
+See the [Strands](#strands) section for details on how the proof decoding algorithm works. The solidity implementation is similar to the C++ implementation, except that it does not decode the proof to an intermediate format prior to processing. Instead, it directly processes the encoded proof for efficiency reasons.
+
+We to be a little bit careful so as to support processing the proof in a single pass because the number of strands is not known in advance. Solidity does not support resizing dynamic memory arrays, so the function that parses the strands is careful to not allocate any memory. Instead, as it executes it builds up a contiguous array of strand elements. Each strand element contains a 32-byte strandState, a keyHash, and a node that will store the leaf for this strand (if any):
+
+    Strand element (128 bytes):
+        uint256 strandState: [0 padding...] [1 byte: depth] [1 byte: merged] [4 bytes: next] [4 bytes: nodeAddr]
         [32 bytes: keyHash]
         [64 bytes: possibly containing leaf node for this strand]
+
+The strandState contains the working information needed while processing the proof, and the keyHash for this strand.
+
+Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-byte nodeHash. The nodeContents uses the least significant byte to indicate the type of the node, and the rest is specific to the nodeType as follows:
 
     Node (64 bytes):
         uint256 nodeContents: [0 padding...] [nodeType specific (see below)] [1 byte: nodeType]
@@ -896,6 +921,20 @@ Finally, you can modify the tree with `Quadrable.put`. It may return a new `root
                  Branch: [4 bytes: parentNodeAddr] [4 bytes: leftNodeAddr] [4 bytes: rightNodeAddr]
         bytes32 nodeHash
 
+The `parentNodeAddr` is only used as a temporary scratch area of memory during tree updates, to avoid recursion.
+
+
+
+### Limitations
+
+* Only the `CompactNoKeys` proof encoding is supported. This means that enumeration by key is not possible.
+* Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string).
+* The Solidity implementation does *not* use [copy-on-write](#copy-on-write), so multiple versions of the tree can not exist simultaneously. Instead, the tree is updated in-place during modifications (nodes are reused when possible). This is done to limit the amount of memory consumed.
+* Proofs cannot be created by the Solidity implementation. This should not be necessary for most use-cases.
+* Large proofs can have [excessive gas costs](#gas-costs).
+
+
+### Gas Costs
 
 
 
