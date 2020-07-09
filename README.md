@@ -69,26 +69,26 @@
 
 Quadrable is an authenticated multi-version database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. There are [C++](#c-library) and [Solidity](#solidity) libraries, as well as a git-like [command-line tool](#command-line).
 
-* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will result in a new root. Anyone who knows the root value can perform remote queries on the database and be confident that the responses are authentic. To accomplish this, the remote server provides [proofs](#proofs) along with the responses, which are validated against the root.
-* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints, so these can be used liberally.
+* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will result in a new one. Anyone who knows the root value of a database can perform remote queries to it and be confident that the responses are authentic. To accomplish this, the remote server provides a [proof](#proofs) along with each response, which is validated against the root.
+* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
-* *Merkle tree*: Each version of the database is represented by a [tree](#trees-and-exponential-growth). The leaves of this tree are the inserted records, and they are combined together with calls to a cryptographic hash function, creating a smaller level of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set of intermediate nodes, and this procedure continues until a single node is left, which is the root node. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
-* *Binary*: The style of merkle tree used by Quadrable combines together [exactly two](#merkle-trees) nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these more complicated designs.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, say 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) address-space. This means that record keys can be hashed and used directly as each leaf's location in the tree.
+* *Merkle tree*: Each version of the database is a [tree](#trees-and-exponential-growth). The leaves of this tree are the inserted records which are combined together with calls to a cryptographic hash function, creating a smaller set of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set, and this procedure continues until a single node is left, which is the root node. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
+* *Binary*: The style of merkle tree used by Quadrable combines together [exactly two](#merkle-trees) nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these alternative designs.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, for example 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) key-space. This means that hashes of keys can used directly as each leaf's location in the tree.
 
-Values are authenticated by generating and importing proofs:
+Values are authenticated by exporting and importing proofs:
 
 * *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have some space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's compact proof encoding never transmits redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
-* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a [partial-tree](#combined-proofs) when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present (or were proved to *not* be present).
+* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a [partial-tree](#combined-proofs) when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you had made the same modifications on the full tree. After importing a proof, additional proofs that were exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present (or were proved to *not* be present).
 
 
 ## Building
 
 ### Dependencies
 
-The LMDB library and header files are required. On Ubuntu/Debian run this:
+The [LMDB](https://symas.com/lmdb/) library and header files are required. On Ubuntu/Debian run this:
 
     sudo apt install -y liblmdb-dev
 
@@ -125,13 +125,13 @@ You can view a coverage report of the tests by running:
 
 The reason we use trees is because of the exponential growth in the number of nodes as the number of levels is increased. In other words, the number of intermediate nodes that must be traversed to get to a leaf grows much slower than the total number of nodes.
 
-In computer science trees are usually drawn as growing in the downwards direction, for some reason. Because of this, we'll use the term "depth" to refer to how many levels down you are from the top node (the "root").
+For some reason, computer science trees are usually drawn as growing in the downwards direction. Because of this, we use the term "depth" to refer to how many levels down you are from the top node (the "root").
 
 ![](docs/exponential.svg)
 
 ### Merkle Trees
 
-In a merkle tree, each node has a "nodeHash" which is the formed by hashing the concatenation of its children nodeHashes. In Quadrable the tree is binary, so there are always exactly two children (except for leaf nodes, which have none). The order of the concatenation is important: The left child's nodeHash comes first, followed by the right child's:
+In a merkle tree, each node has a "nodeHash" which is formed by hashing the concatenation of its children nodeHashes. In Quadrable the tree is binary, so there are always exactly two children (except for leaf nodes, which have none). The order of the concatenation is important: The left child's nodeHash comes first, followed by the right child's:
 
 ![](docs/hash-tree.svg)
 
@@ -149,13 +149,13 @@ Keys are hashed for multiple reasons:
 
 * It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we [collapse leaves](#collapsed-leaves)).
 * Since the hash function used by Quadrable is believed to be cryptographically secure (meaning among other things that it acts like a [random oracle](https://eprint.iacr.org/2015/140.pdf)), the keys should be fairly evenly distributed which reduces the average depth of the tree.
-* It is computationally expensive to find two or more keys that have the same hash prefix, which an adversarial user might like to do to increase the cost of traversing the tree or, even worse, [increase the proof sizes](#proof-bloating).
+* It is computationally expensive to find two or more distinct keys whose hashes have long common prefixes, which an adversarial user might like to do to increase the cost of traversing the tree or [increase the proof sizes](#proof-bloating).
 
 
 
 ### Sparseness
 
-Obviously creating a full tree with 2^256 possible key paths is impossible. Fortunately, there is [an optimization](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
+Obviously creating a full tree with 2<sup>256</sup> possible key paths is impossible. Fortunately, there is [an optimization](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
 
 By caching the value of an empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them when needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
 
