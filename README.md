@@ -960,6 +960,7 @@ Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-by
 * Only the `CompactNoKeys` proof encoding is supported. This means that enumeration by key is not possible.
 * Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string).
 * The Solidity implementation does *not* use [copy-on-write](#copy-on-write), so multiple versions of the tree can not exist simultaneously. Instead, the tree is updated in-place during modifications (nodes are reused when possible). This is done to limit the amount of memory consumed.
+* Unlike the C++ implementation operations are not [batched](#operation-batching). This is complicated to do in Solidity because dynamic memory management is difficult. Nevertheless, this may be an area for future optimisation.
 * Proofs cannot be created by the Solidity implementation. This should not be necessary for most use-cases.
 * Large proofs can have [excessive gas costs](#gas-usage).
 
@@ -974,9 +975,9 @@ There are several variables than impact the gas usage of the library:
 * Proportion of inclusion versus non-inclusion proofs
 * Length of the values
 
-Following is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. One element is selected to be proven (an inclusion proof). The proof size is recorded and this is used to estimate calldata costs (slightly too high, doesn't account for zero bytes). Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
+Following is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. One element is selected to be proven (an inclusion proof). The proof size is recorded and this is used to estimate calldata costs. Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
 
-| DB Size | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
+| DB Size (N) | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 0 | 1216 | 2722 | 1622 | 1693 | 7253 |
 | 10 | 3.3 | 6368 | 8582 | 3651 | 8376 | 26977 |
@@ -986,11 +987,29 @@ Following is a generated table of gas costs for a simple scenario. For each row,
 | 100000 | 16.6 | 19776 | 23401 | 8031 | 22830 | 74038 |
 | 1000000 | 19.9 | 22848 | 25083 | 8697 | 25038 | 81666 |
 
-In general, the cost will be proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiple it by 5000 (very rough estimate).
+* The gas usage is roughly proportional to the number of witnesses provided with the proof. Because of logarithmic growth, the DB size can grow quite large without raising the gas cost considerably.
+* The calldata estimate is slightly high since doesn't account for zero bytes.
 
-For optimistic roll-up applications, these operations happen very infrequently so typical gas costs aren't the main concern. The bigger issue is the worst-case gas usage in an [adversarial environment](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that this cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then fraud can be committed.
+Now consider the following test. Here we have setup a DB with 1 million records (the same configuration as the last row in the previous test). Each row creates a proof proving the inclusion of `N` different records. This results in a proof with `N` [strands](#strands). Each of the records is queried and then updated.
 
-Let's assume that an attacker can create colliding keyHashes up to a depth of 160 for every element to be proven. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. This suggests that -- for a very wide security margin -- fraud-proof systems should try to use 15 or fewer values for each unit of verification (assuming other gas costs are negligible).
+| Num Strands (N) | Approx Witnesses | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 19.9 | 22848 | 25083 | 8697 | 25038 | 81666 |
+| 2 | 39.9 | 41632 | 50833 | 17683 | 51156 | 161304 |
+| 4 | 79.7 | 79136 | 97768 | 36112 | 104747 | 317763 |
+| 8 | 159.5 | 144736 | 174654 | 70738 | 204839 | 594967 |
+| 16 | 318.9 | 260000 | 328373 | 138122 | 398654 | 1125149 |
+| 32 | 637.8 | 508768 | 643279 | 278367 | 803794 | 2234208 |
+| 64 | 1275.6 | 971712 | 1265301 | 564306 | 1630652 | 4431971 |
+| 128 | 2551.2 | 1789600 | 2485351 | 1138851 | 3288189 | 8701991 |
+
+* The number of witnesses is roughly the number of strands times the average depth of the tree (fixed at 19.9). This estimate is slightly high because it doesn't account for the witnesses omited due to [combined proofs](#combined-proofs). A better proxy for this estimate would be proof size/calldata gas.
+
+In general, the gas cost is proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiple it by 5000 (very rough estimate). The gas cost technically isn't linear, since (among other things) the cost of memory increases quadratically, but this estimate seems to hold for reasonable parameter sizes.
+
+For optimistic roll-up applications, proofs only need to be supplied in the case a fraudulent action is detected. If the system is well designed, then game-theoretically the frequency of this should be "never". Because of this, typical gas costs aren't the primary concern. The bigger issue is the worst-case gas usage in an [adversarial environment](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that it cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then fraud can be committed.
+
+Let's assume that an attacker can create colliding keyHashes up to a depth of 160 for every element to be proven. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. In order to leave a very wide security margin, this suggests that fraud-proof systems should try to use 15 or fewer values for each unit of verification (assuming other gas costs are negligible).
 
 
 ## Author and Copyright
