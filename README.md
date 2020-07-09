@@ -961,16 +961,30 @@ The `parentNodeAddr` is only used as a temporary scratch area of memory during t
 
 ### Gas Usage
 
-| DB Size | Average Depth | Import (gas) | Query (gas) | Update (gas) |
-| --- | --- | --- | --- | --- |
-| 1 | 0 | 2722 | 1622 | 1693 |
-| 10 | 3.3 | 8582 | 3651 | 8376 |
-| 100 | 6.6 | 8848 | 3651 | 8377 |
-| 1000 | 10 | 14014 | 5356 | 13977 |
-| 10000 | 13.3 | 18887 | 7031 | 19518 |
-| 100000 | 16.6 | 23401 | 8031 | 22830 |
-| 1000000 | 19.9 | 25083 | 8697 | 25038 |
+There are several variables than impact the gas usage of the library:
 
+* Size of the database and distribution of its keys
+* Number of elements to be proven
+* Distribution of *their* keys
+* Proportion of inclusion versus non-inclusion proofs
+* Length of the values
+
+As a simple example to begin the discussion, here is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. One element is selected to be proven (inclusion proof). The proof size is recorded and this is used to estimate calldata costs (slightly too high, doesn't account for zero bytes). Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
+
+| DB Size | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) |
+| 1 | 0 | 1216 | 2722 | 1622 | 1693 |
+| 10 | 3.3 | 6368 | 8582 | 3651 | 8376 |
+| 100 | 6.6 | 7392 | 8848 | 3651 | 8377 |
+| 1000 | 10 | 11520 | 14014 | 5356 | 13977 |
+| 10000 | 13.3 | 14624 | 18887 | 7031 | 19518 |
+| 100000 | 16.6 | 19776 | 23401 | 8031 | 22830 |
+| 1000000 | 19.9 | 22848 | 25083 | 8697 | 25038 |
+
+In general, the cost will be proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiple it by 4000 (very rough estimate).
+
+For optimistic roll-up applications, these operations happen very infrequently so typical gas costs aren't the main concern. The bigger issue is the worst-case gas usage in an [adversarial environment](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that this cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then fraud can be committed.
+
+Let's assume that an attacker can create fully saturated paths for every element to be proven to a depth of 160. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 640k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 20 of these worst-case scenario values could be verified. This suggests that fraud-proof systems should try to use fewer than 20 values for each unit of verification.
 
 
 ## Author and Copyright
