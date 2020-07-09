@@ -3,19 +3,19 @@ pragma solidity ^0.6.0;
 library Quadrable {
     // Proof import
 
-    enum StrandType {
-        Leaf, // = 0,
-        Invalid, // = 1,
-        WitnessLeaf, // = 2,
-        WitnessEmpty // = 3,
+    enum StrandType { // Specified by proof encoding
+        Leaf,         // 0,
+        Invalid,      // 1,
+        WitnessLeaf,  // 2,
+        WitnessEmpty  // 3,
     }
 
-    enum NodeType { // Internal values (different from C++ implementation)
-        Empty, // = 0
-        Leaf, // = 1
-        Witness, // = 2
-        WitnessLeaf, // = 3
-        Branch // = 4
+    enum NodeType {  // Internal values (different from C++ implementation)
+        Empty,       // 0
+        Leaf,        // 1
+        Witness,     // 2
+        WitnessLeaf, // 3
+        Branch       // 4
     }
 
     struct ProofState {
@@ -517,7 +517,7 @@ library Quadrable {
         }
 
 
-        // Do splitting
+        // Leaf splitting
 
         if (nodeType == NodeType.Leaf || nodeType == NodeType.WitnessLeaf) {
             bytes32 foundKeyHash = getNodeLeafKeyHash(nodeAddr);
