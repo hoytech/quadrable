@@ -4,7 +4,7 @@ pragma experimental ABIEncoderV2;
 import "./Quadrable.sol";
 
 contract TestHarness {
-    function testProof(bytes memory encodedProof, bytes[] memory queries, bytes[] memory updateKeys, bytes[] memory updateVals) public view
+    function testProof(bytes calldata encodedProof, bytes[] memory queries, bytes[] memory updateKeys, bytes[] memory updateVals) external view
                  returns (bytes32 origRoot, bytes[] memory queryResults, bytes32 updatedRoot, uint256[3] memory gasUsage) {
 
         uint256 g = gasleft();
