@@ -167,7 +167,7 @@ Quadrable makes two minor changes to this model of sparseness that help simplify
 1. An empty leaf is given a nodeHash of 32 zero bytes.
 1. The hash function used when combining two child nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual.
 
-Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf that has an all zero hash. Because the override is not used when hashing leaves (and also because of the different hashing domains, see the next section), it is also computationally infeasible to find a non-empty node that is interpreted as a leaf, and vice versa.
+Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf that has an all zero hash. Because the override is not used when hashing leaves (and also because of the different hashing domains, see the next section), it is also computationally infeasible to find a non-empty node that could be interpreted as a leaf, and vice versa.
 
 The purpose of these changes is to make empty sub-trees at all depths have 32 zero bytes as their nodeHashes. This includes the root node, so a totally empty tree will have a root of 32 zeros.
 
@@ -460,7 +460,7 @@ However, since our hashes are 256 bits long, in the worst case scenario we would
 
 In fact, this is one of the reasons we make sure to hash keys before using them as paths in our tree. If users were able to present hashes of keys to be inserted into the DB without having to provide the corresponding preimages (unhashed versions), then they could deliberately put values into the DB that cause very long proofs to be generated (compare also to [DoS attacks based on hash collisions](https://lwn.net/Articles/474912/)).
 
-If keys can only be selected by trusted parties, then it may make sense to use special non-hash values for keys. This could considerably reduce proof overhead if values commonly requested together are given adjacent keys. Quadrable does not yet support this, but it would be a trivial modification.
+If keys can only be selected by trusted parties, then it may make sense to use special non-hash values for keys. This could considerably reduce proof overhead if values commonly requested together are given adjacent keys. Quadrable does not yet support this, but it could in the future (trivially, if keys are restricted to exactly 256 bits).
 
 So why are we worried about deep trees and their correspondingly larger proof sizes? The worst case overhead for proving a single value is around 8,000 bytes and a couple hundred calls to the hash function, which is of course trivial for modern networks and CPUs. The issue is that the proof size and computational overhead of verification is part of the security attack surface for some protocols. For instance, if in an [optimistic rollup](https://docs.ethhub.io/ethereum-roadmap/layer-2-scaling/optimistic_rollups/) system verifying a fraud proof requires more gas than is allowed in a single block, then an attacker can get away with fraudulent transactions. The best solution to this is to keep the fraud-proof units granular enough that even heavily bloated proofs can be verified with a [reasonable amount of gas](#gas-usage). Counter-intuitively, this also means it is important for verification code to be gas-efficient, even if it is expected to rarely be called during normal operation of the protocol.
 
@@ -499,7 +499,7 @@ Because traversing Quadrable's tree data-structure requires reading many small r
 
 Quadrable's C++ implementation uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
 
-LMDB is a B-tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB. Compared to LevelDB, LMDB has radically better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers real ACID transactions and multi-process access (in addition to multi-thread), and is less likely to suffer data corruption.
+LMDB is a B-tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB. Compared to LevelDB, LMDB has better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers real ACID transactions and multi-process access (in addition to multi-thread), and is less likely to suffer data corruption.
 
 LMDB supports multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a single transaction), and because our nodes are more granular than LMDB's B-tree pages.
 
@@ -1007,22 +1007,23 @@ There are several variables than impact the gas usage of the library:
 
 Following is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. A single element is selected to be proven (an inclusion proof). The proof size is recorded and this is used to estimate calldata costs. Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
 
-| DB Size (N) | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
+| DB Size | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 0 | 1216 | 2722 | 1622 | 1693 | 7253 |
-| 10 | 3.3 | 6368 | 8582 | 3651 | 8376 | 26977 |
-| 100 | 6.6 | 7392 | 8848 | 3651 | 8377 | 28268 |
-| 1000 | 10 | 11520 | 14014 | 5356 | 13977 | 44867 |
-| 10000 | 13.3 | 14624 | 18887 | 7031 | 19518 | 60060 |
-| 100000 | 16.6 | 19776 | 23401 | 8031 | 22830 | 74038 |
-| 1000000 | 19.9 | 22848 | 25083 | 8697 | 25038 | 81666 |
+| 1 | 0 | 1216 | 2910 | 1622 | 1693 | 7441 |
+| 10 | 3.3 | 6368 | 8801 | 3651 | 8376 | 27196 |
+| 100 | 6.6 | 7392 | 9073 | 3651 | 8377 | 28493 |
+| 1000 | 10 | 11520 | 14264 | 5356 | 13977 | 45117 |
+| 10000 | 13.3 | 14624 | 19155 | 7031 | 19518 | 60328 |
+| 100000 | 16.6 | 19776 | 23700 | 8031 | 22830 | 74337 |
+| 1000000 | 19.9 | 22848 | 25400 | 8697 | 25038 | 81983 |
 
 * The gas usage is roughly proportional to the number of witnesses provided with the proof. Because of logarithmic growth, the DB size can grow quite large without raising the gas cost considerably.
 * The calldata estimate is slightly high since it doesn't account for zero bytes.
+* The import gas includes a copy of the proof from calldata to memory which is needed to call the `Quadrable.importProof()` function. Theoretically this could be optimised, but it currently accounts for only around 1% of the import costs so is not high priority.
 
 Now consider the following test. Here we have setup a DB with 1 million records (the same configuration as the last row in the previous test). Each row creates a proof proving the inclusion of `N` different records. This results in a proof with `N` [strands](#strands). Each of the `N` records is queried and then updated (with no batching).
 
-| Num Strands (N) | Approx Witnesses | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
+| Num Strands | Approx Witnesses | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 19.9 | 22848 | 25083 | 8697 | 25038 | 81666 |
 | 2 | 39.9 | 41632 | 50833 | 17683 | 51156 | 161304 |
@@ -1035,7 +1036,7 @@ Now consider the following test. Here we have setup a DB with 1 million records 
 
 * The number of witnesses is roughly the number of strands times the average depth of the tree (fixed at 19.9). This estimate is slightly high because it doesn't account for the witnesses omited due to [combined proofs](#combined-proofs). Better proxies for this estimate are proof size or (equivalently) calldata gas: Observe that when the number of strands doubles, the calldata gas less than doubles. This effect will become more pronounced with smaller DB sizes or larger number of strands.
 
-In general, the gas cost is proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiple it by 5000 (very rough estimate). The gas cost technically isn't linear, since (among other things) the cost of EVM memory increases quadratically, but this estimate seems to hold for reasonable parameter sizes.
+In general, the gas cost is proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiply it by 5000 (very rough estimate). The gas cost technically isn't linear, since (among other things) the cost of EVM memory increases quadratically, but this estimate seems to hold for reasonable parameter sizes.
 
 For optimistic roll-up applications, proofs only need to be supplied in the case a fraudulent action is detected. If the system is well designed, then game-theoretically the frequency of this should be "never". Because of this, typical gas costs aren't the primary concern. The bigger issue is the worst-case gas usage in the presence of [adversarially selected keys](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that it cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then there is an opportunity for fraud to be committed.
 
