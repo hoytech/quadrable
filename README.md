@@ -148,9 +148,9 @@ In Quadrable's implementation of a merkle tree, keys are first hashed and then t
 
 Keys are hashed for multiple reasons:
 
-* It puts a bound on the depth of the tree. Since Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we [collapse leaves](#collapsed-leaves)).
+* It puts a bound on the depth of the tree. Because Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we [collapse leaves](#collapsed-leaves)).
 * Since the hash function used by Quadrable is believed to be cryptographically secure (meaning among other things that it acts like a [random oracle](https://eprint.iacr.org/2015/140.pdf)), the keys should be fairly evenly distributed which reduces the average depth of the tree.
-* It is computationally expensive to find two or more distinct keys whose hashes have long common prefixes, which an adversarial user might like to do to increase the cost of traversing the tree or [increase the proof sizes](#proof-bloating).
+* It is computationally expensive to find two or more distinct keys whose hashes have long common prefixes, which an adversarial user might like to do to increase the cost of traversing the tree or [the proof sizes](#proof-bloating).
 
 
 
@@ -167,7 +167,7 @@ Quadrable makes two minor changes to this model of sparseness that help simplify
 1. An empty leaf is given a nodeHash of 32 zero bytes.
 1. The hash function used when combining two child nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual.
 
-Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf that has an all zero hash. Because the override is not used when hashing leaves (and also because of the different hashing domains, see the next section), it is also computationally infeasible to find a non-empty node that could be interpreted as a leaf, and vice versa.
+Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf that has an all zero hash. Because the override is not used when hashing leaves (and also because of the different hashing domains, see the next section), it is also computationally infeasible to find a non-empty node that could be interpreted as a leaf, or vice versa.
 
 The purpose of these changes is to make empty sub-trees at all depths have 32 zero bytes as their nodeHashes. This includes the root node, so a totally empty tree will have a root of 32 zeros.
 
@@ -230,6 +230,7 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 ![](docs/bubbling.svg)
 
+**Note**: Creating proofs with sufficient information to support a deletion is not yet implemented. The proof creation code needs determine which leaf nodes will be bubbled and provide them as separate WitnessLeaf strands. It would also help to implement WitnessBranch strand types to efficiently prove that a sub-tree has two or more children and therefore cannot be bubbled.
 
 
 
@@ -344,6 +345,8 @@ A Quadrable proof includes a list of strands, *sorted by the hashes of their key
   * Leaf: The leaf value (ie the result of a get query)
   * WitnessLeaf: The hash of the leaf value (allows to prover to create the nodeHash)
   * Witness: Unused
+
+Note that WitnessLeaf nodes must have their keyHash and valueHash included in a proof so the verifier can hash the nodeHash. It is not sufficient to pass in the nodeHash, because this would allow an attacker to take the nodeHash of a branch and present it as a WitnessLeaf. This "Leaf" could then be used to create counterfeit non-inclusion proofs for elements underneath the branch. For a similar reason, if future "WitnessBranch" node types are implemented, the nodeHashes of both children must be provided by the proof.
 
 The first thing the verifier should do is run some initial setup on each strand (although this can be done lazily on first access instead, if desired):
 
@@ -521,6 +524,7 @@ Internally there are several different types of nodes stored.
 * **Empty**: Empty nodes are not stored in the database, but instead are implicit children of branch left/right nodes.
 * **Leaf**: These are collapsed leaves, and contain enough information to satisfy get/put/del operations. A hash of the key is stored, but not the key itself. This is (optionally) stored in a [separate table](#key-tracking).
 * **Witness** and **WitnessLeaf**: These are nodes that exist in partial-trees. A Witness node could be standing in for either a branch or a leaf, but a WitnessLeaf could only be a Leaf. The only difference between a WitnessLeaf and a Leaf is that the WitnessLeaf only stores a hash of the value, not the value itself. This means that it cannot be used to satisfy a get request. However, it still could be used for non-inclusion purposes, or for updating/deletion.
+* **WitnessBranch**: This nodeType is *not implemented* currently. In the future it could be useful for creating smaller proofs where a deletion is required. It may make sense to implement all of WitnessBranchBoth, WitnessBranchLeft, and WitnessBranchRight to avoid sending empty hashes.
 
 ### Node layout in storage
 
@@ -988,7 +992,7 @@ Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-by
 ### Limitations of Solidity Implementation
 
 * Only the `CompactNoKeys` proof encoding is supported. This means that enumeration by key is not possible.
-* Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string).
+* Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string). The proof creation code also needs to be updated to be able to create deletion-capable proofs (see [bubbling](#bubbling)).
 * The Solidity implementation does *not* use [copy-on-write](#copy-on-write), so multiple versions of the tree can not exist simultaneously. Instead, the tree is updated in-place during modifications (nodes are reused when possible). This is done to limit the amount of memory consumed.
 * Unlike the C++ implementation operations are not [batched](#operation-batching). This is complicated to do in Solidity because dynamic memory management is difficult. Nevertheless, this may be an area for future optimisation.
 * Proofs cannot be created by the Solidity implementation. This should not be necessary for most use-cases.
