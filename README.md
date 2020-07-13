@@ -245,7 +245,7 @@ A proof is a record from the tree along with enough information for somebody who
 * Broadcast from a satellite
 * Embedded in a blockchain
 
-The purpose of using a tree structure is so that the size a proof is proportional to the depth of the tree, and not the total number of leaves.
+The purpose of using a tree structure is so that the size of a proof is proportional to the depth of the tree, and not the total number of leaves.
 
 ### Proofs and witnesses
 
@@ -293,7 +293,7 @@ After taking these observations into account, we see that if we are sending a co
 
 ![](docs/proof5.svg)
 
-By the way, consider the degenerate case of creating a proof for all of the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways. Also, nothing additional needs to be sent to prove that a record does not exist, since the verifier has the entire set and can just check to see that it is not present.
+By the way, consider the degenerate case of creating a proof for *all* of the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways. Also, nothing additional needs to be sent to prove that a record does not exist, since the verifier has the entire set and can just check to see that it is not present.
 
 
 
@@ -1022,7 +1022,7 @@ Following is a generated table of gas costs for a simple scenario. For each row,
 | 1000000 | 19.9 | 22848 | 25400 | 8697 | 25038 | 81983 |
 
 * The gas usage is roughly proportional to the number of witnesses provided with the proof. Because of logarithmic growth, the DB size can grow quite large without raising the gas cost considerably.
-* The calldata estimate is slightly high since it doesn't account for zero bytes.
+* The calldata estimate is slightly high since it doesn't account for the zero byte discount.
 * The import gas includes a copy of the proof from calldata to memory which is needed to call the `Quadrable.importProof()` function. Theoretically this could be optimised, but it currently accounts for only around 1% of the import costs so is not high priority.
 
 Now consider the following test. Here we have setup a DB with 1 million records (the same configuration as the last row in the previous test). Each row creates a proof proving the inclusion of `N` different records. This results in a proof with `N` [strands](#strands). Each of the `N` records is queried and then updated (with no batching).
