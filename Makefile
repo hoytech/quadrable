@@ -7,8 +7,8 @@ INCS     = -Iinclude -Iexternal -Iexternal/hoytech-cpp -Iexternal/docopt.cpp
 LDLIBS   = -l:liblmdb.a -pthread
 LDFLAGS  = -flto $(XLDFLAGS)
 
-CHECK_SRCS = check.cpp external/hoytech-cpp/hex.cpp
-TOOL_SRCS  = quadb.cpp external/hoytech-cpp/hex.cpp
+CHECK_SRCS = check.cpp
+TOOL_SRCS  = quadb.cpp
 
 
 CHECK_OBJS := $(CHECK_SRCS:.cpp=.o)
@@ -47,7 +47,7 @@ external/hoytech-cpp/README.md:
 
 
 clean: phony
-	rm -rf quadb check *.o external/hoytech-cpp/hex.o *.d testdb/ *.gcda *.gcno coverage.lcov coverage-report/
+	rm -rf quadb check *.o *.d testdb/ *.gcda *.gcno coverage.lcov coverage-report/
 
 run-check: phony check
 	mkdir -p testdb/
