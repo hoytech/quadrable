@@ -70,7 +70,7 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
 
 ## Introduction
 
-* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications to the database will result in a new one. Anyone who knows the root value of a database can perform remote queries to it and be confident that the responses are authentic. To accomplish this, the remote server provides a [proof](#proofs) along with each response, which is validated against the root.
+* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents a digest of the complete contents of the database, and any modifications to the database will result in a new one. Anyone who knows the root value of a database can perform remote queries on it and be confident that the responses are authentic. To accomplish this, the remote server provides a [proof](#proofs) along with each response, which is validated against the root.
 * *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
@@ -81,7 +81,7 @@ Although not required to use the library, it may help to understand the core dat
 
 Values are authenticated by exporting and importing proofs:
 
-* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have some space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's [proof encoding](#proof-encodings) never includes redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-4 bytes per proved item).
+* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have some space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's [proof encoding](#proof-encodings) never includes redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-6 bytes per proved item).
 * *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a "partial-tree" when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you made the same modifications to the full tree. After importing a proof, additional proofs that were exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present (or were proved to *not* be present).
 
 Quadrable is a [Log Periodic](https://logperiodic.com) project.
@@ -160,7 +160,7 @@ Keys are hashed for multiple reasons:
 
 Obviously creating a full tree with 2<sup>256</sup> possible leaves is impossible. Fortunately, there is [an optimisation](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this absurd number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
 
-By caching the value of an empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of using cached values rather than re-computing them when needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
+By caching the value of an empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of pre-computing values and caching them for later use instead of re-computing them as needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
 
 ![](docs/sparse.svg)
 
@@ -169,12 +169,12 @@ Quadrable makes two minor changes to this model of sparseness that help simplify
 1. An empty leaf is given a nodeHash of 32 zero bytes.
 1. The hash function used when combining two child nodes has a special case override: Given an input of 64 zero bytes, the output is 32 zero bytes. Any other input is hashed as usual.
 
-Because of the first pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf that has an all zero hash. Because the override is not used when hashing leaves (and also because of the different hashing domains, see the next section), it is also computationally infeasible to find a non-empty node that could be interpreted as a leaf, or vice versa.
+Because of the pre-image resistance property of our hash function, it is computationally infeasible to find another value for a leaf that has an all zero hash. Since the override is not used when hashing leaves (and also because of the different hashing domains, see the next section), it is also computationally infeasible to find a non-empty node that could be interpreted as a leaf, or vice versa.
 
-The purpose of these changes is to make empty sub-trees at all depths have 32 zero bytes as their nodeHashes. This includes the root node, so a totally empty tree will have a root of 32 zeros.
+The purpose of these changes is to make empty sub-trees at all depths have 32 zero bytes as their nodeHashes. This includes the root node, so a totally empty tree will have a root of 32 zeros. This is desirable because:
 
 * The code is slightly simpler.
-* All zero roots are user-friendly: It's easy to recognize an empty tree.
+* All-zero roots are user-friendly: It's easy to recognize an empty tree.
 * A run of zeros will compress better, so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
 * In some situations, like an Ethereum smart contract, using all zero values allows some minor optimisations. Specifically, 0 bytes in the calldata is cheaper on gas, contract code size is reduced, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a naive implementation would store the cached empty values in storage as opposed to contract code.
 
@@ -227,7 +227,7 @@ Quadrable does not store empty nodes. In the C++ implementation there are specia
 
 ### Bubbling
 
-Because of collapsed leaves, a branch implies that there are at least 2 leaves below the branch. Since an important requirement is that equivalent trees have equivalent roots, we must maintain this invariant when a leaf is deleted.
+Because of collapsed leaves, the existence of a branch implies that there are at least 2 leaves somewhere below it. Since an important requirement is that equivalent trees have equivalent roots, we must maintain this invariant when a leaf is deleted.
 
 In order to keep all leaves collapsed to the lowest possible depth, a deletion may require moving a leaf several levels further up, potentially even up to the root (if it is the only remaining leaf in the tree). This is called "bubbling" the leaf back up:
 
@@ -305,9 +305,9 @@ By the way, consider the degenerate case of creating a proof for *all* of the le
 
 So far we have discussed proving that a queried value *exists* in the database. For many applications it is also necessary to prove that a value does *not* exist. These are called "non-inclusion proofs".
 
-In a pure sparse merkle tree, every leaf is conceptually present in the tree, even if it is empty. In such systems it would be sufficient to provide an existence proof for the corresponding empty leaf. However, Quadrable uses the collapsed leaf optimisation which means that this will not work since the paths to the empty leaves might be blocked by collapsed leaves. Because of this, non-inclusion proofs are slightly more complicated, however this complexity is more than made up for by the reduction in proof sizes.
+In a pure sparse merkle tree, every leaf is conceptually present in the tree, even if it is empty. In such systems it would be sufficient to provide an existence proof for the corresponding empty leaf. However, Quadrable uses the collapsed leaf optimisation which means that this will not work since the paths to the empty leaves might be blocked by collapsed leaves. Because of this, non-inclusion proofs are slightly more complicated, however this complexity is more than made up for by the reduction in proof sizes and the amount of hashing required.
 
-To provide a non-inclusion proof, Quadrable uses one of two methods, depending on the structure of the tree and the key hash of the queried record.
+To create a non-inclusion proof, Quadrable uses one of two methods, depending on the structure of the tree and the key hash of the queried record.
 
 The first method is to present a branch where the corresponding child node is occupied by an empty sub-tree value (all zeros):
 
@@ -332,11 +332,11 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 ![](docs/strands1.svg)
 
-Quadrable's proof structure uses a concept of "strands". This allows us to reduce the proof size when multiple records (inclusion or non-inclusion) are to be proved from the same DB. It is similar to the [authentication octopus algorithm](https://eprint.iacr.org/2017/933.pdf), except that the tentacles can be different lengths which is necessary for our [collapsed leaves](#collapsed-leaves) optimisation, and it doesn't necessarily work from bottom up.
+Quadrable's proof structure uses a concept of "strands". This allows us to reduce the proof size when multiple records (inclusion or non-inclusion) are to be proved from the same DB. It is similar to the [authentication octopus algorithm](https://eprint.iacr.org/2017/933.pdf), except that the tentacles can be different lengths which is necessary for our [collapsed leaves](#collapsed-leaves) optimisation. Also, it doesn't necessarily work from bottom up (this is up to the proof encoder).
 
 The algorithm isn't necessarily optimal, but it seems to result in fairly compact proofs which can be shrunk further with extra proof-time optimisations. Additionally, the proofs can be processed with a single pass in resource-constrained environments such as smart contracts. After processing a proof, you end up with a ready-to-use partial-tree.
 
-Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than records requested to be proven. This can happen when a witness reveals an empty sub-tree that is sufficient for satisfying a requested non-inclusion proof.
+Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than records requested to be proven. This can happen when a witness on a strand reveals an empty sub-tree that is sufficient for satisfying a non-inclusion proof for a different requested value.
 
 A Quadrable proof includes a list of strands, *sorted by the hashes of their keys*. Each strand contains the following:
 
@@ -456,7 +456,7 @@ The decoding algorithm keeps a variable that stores an index into the strands. T
 * The initial value of the working strand is the *last* (right-most) strand. This was an arbitrary choice, but usually the strands are worked on starting at the right, because left strands survive longer (the left-most one always becomes the final strand).
 * The short jumps simply add one to the 5 bit distance and add or subtract this from the working strand
 * The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows a proof to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
-* Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap" around, which could allow some clever encoding-time optimisations, but the added complexity didn't seem worth it.
+* Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap around", which could allow some clever encoding-time optimisations, but the added complexity didn't seem worth it.
 
 
 
@@ -507,9 +507,9 @@ Because traversing Quadrable's tree data-structure requires reading many small r
 
 Quadrable's C++ implementation uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
 
-LMDB is a B+tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB. Compared to LevelDB, LMDB has better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers real ACID transactions and multi-process access (in addition to multi-thread), and is less likely to suffer data corruption.
+LMDB is a B+ tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB. Compared to LevelDB, LMDB has better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers real ACID transactions and multi-process access (in addition to multi-thread), and is less likely to suffer data corruption.
 
-LMDB supports multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a single transaction), and because our nodes are more granular than LMDB's B+tree pages.
+LMDB supports multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a single transaction), and because our nodes are more granular than LMDB's B+ tree pages.
 
 ### nodeId
 
@@ -517,7 +517,7 @@ Some implementations of hash trees store leaves and nodes in a database keyed by
 
 Quadrable does not do this. Instead, every time a node is added, a numeric 64-bit incrementing `nodeId` is allocated and the node is stored with this key. Although records are not de-duplicated, there are several advantages to this scheme:
 
-* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, the top few levels of nodes in a tree are likely to reside in the same or nearby B+tree pages.
+* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, the top few levels of nodes in a tree are likely to reside in the same or nearby B+ tree pages.
 * When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree. Since nodeIds are never reused, nobody could've "grabbed it back".
 * Intermediate nodes don't store the hashes of their two children nodes, but instead just the nodeIds. This means these references occupy `8*2 = 16` bytes, rather than `32*2 = 64`.
 
@@ -563,7 +563,7 @@ Without key tracking, you cannot enumerate keys, because the database doesn't st
 
 This output indicates that the value is known, as well as the hash of the key, but not the key itself.
 
-It is slightly more efficient to not store keys in the database, so this should be done for large databases where enumeration is not necessary.
+It is slightly more efficient to not store keys in the database, so this should be done for large databases where enumeration is not necessary, or is available at some other layer of the protocol.
 
 
 
@@ -715,7 +715,7 @@ If no head name is passed in to `quadb fork`, it will fork to a [detached head](
 
 ### quadb stats
 
-This command traverses the your current head and prints a basic summary of its contents:
+This command traverses the current head and prints a basic summary of its contents:
 
     $ quadb stats
     numNodes:        2442
@@ -730,7 +730,7 @@ Don't confuse this command with [quadb status](#quadb-status).
 
 ### quadb diff
 
-You can view the differences between the head you have checked out and another branch with `quadb diff`. If the heads are equivalent, there will be no output:
+You can view the differences between the head you have checked out and another head with `quadb diff`. If they are equivalent, there will be no output:
 
     $ quadb diff temp
     $
@@ -781,7 +781,7 @@ If the proof is in hex and is stored in a file `my-proof`, import it like this:
 
     $ quadb importProof --hex < my-proof
 
-The tree can now be read from and updated as usual, as long as no records that weren't part of the proof are accessed (in which case errors will be thrown). Proofs can also be exported *from* this partial-tree.
+The tree can now be read from and updated as usual, as long as no un-proved records are accessed (if they are, an error will be thrown). Proofs can also be exported *from* this partial-tree.
 
 * `--hex` must be used if the proof is in hexadecimal.
 * [Enumeration by key](#key-tracking) is only possible if the `CompactWithKeys` proof encoding was specified.
@@ -792,7 +792,7 @@ After importing a proof, if you receive additional proofs against the same datab
 
     $ quadb mergeProof --hex < my-proof2
 
-* If the roots of the new proof differs from the root of your current head, and error will be thrown and the head will not be modified.
+* If the computed root of the new proof differs from the root of your current head, an error will be thrown and the head will not be modified.
 * On success, queries/updates/proofs can access any of the records in either proof.
 * `--hex` must be used if the proof is in hexadecimal.
 
@@ -841,13 +841,13 @@ Quadrable allows arbitrary byte strings as either keys or values. There are no r
 
 Keys and values can be arbitrarily long, with the exception that the empty string is not allowed as a key.
 
-Although in the `quadb` application some values are presented in hexadecimal encoding, the Quadrable library itself does not use hexadecimal at all. You may find it convenient to use the `to_hex` and `from_hex` utilities used by `quadb` and the test-suite:
+Although in the `quadb` application some values are presented in hexadecimal encoding, the Quadrable library itself does not use hexadecimal at all. In your own program you may find it convenient to use the `to_hex` and `from_hex` utilities used by `quadb` and the test-suite:
 
     #include "hoytech/hex.h"
     using hoytech::to_hex;
     using hoytech::from_hex;
 
-When using the `quadb` command-line tool, care should be taken to ensure that keys/values don't embed certain characters, as described in [quadb import](#quadb-import).
+If using certain commands in the `quadb` command-line tool, care should be taken to ensure that keys/values don't embed separator characters, as described in [quadb import](#quadb-import).
 
 
 ### Heads
@@ -1026,6 +1026,7 @@ Following is a generated table of gas costs for a simple scenario. For each row,
 | 100000 | 16.6 | 19776 | 23700 | 8031 | 22830 | 74337 |
 | 1000000 | 19.9 | 22848 | 25400 | 8697 | 25038 | 81983 |
 
+* Since the element being proven is not necessarily at the average depth of the tree, these values aren't precise but still provide a representative estimate
 * The gas usage is roughly proportional to the number of witnesses provided with the proof. Because of logarithmic growth, the DB size can grow quite large without raising the gas cost considerably.
 * The calldata estimate is slightly high since it doesn't account for the zero byte discount.
 * The import gas includes a copy of the proof from calldata to memory which is needed to call the `Quadrable.importProof()` function. Theoretically this could be optimised, but it currently accounts for only around 1% of the import costs so is not high priority.
@@ -1045,7 +1046,7 @@ Now consider the following test. Here we have setup a DB with 1 million records 
 
 * The number of witnesses is roughly the number of strands times the average depth of the tree (fixed at 19.9). This estimate is slightly high because it doesn't account for the witnesses omited due to [combined proofs](#combined-proofs). Better proxies for this estimate are proof size or (equivalently) calldata gas: Observe that when the number of strands doubles, the calldata gas less than doubles. This effect will become more pronounced with smaller DB sizes or larger number of strands.
 
-In general, the gas cost is proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiply it by 5000 (very rough estimate). The gas cost technically isn't linear, since (among other things) the cost of EVM memory increases quadratically, but this estimate seems to hold for reasonable parameter sizes.
+In general, the gas cost is proportional to the number of witnesses in the proof, which is roughly the average depth of the tree times the number of values to be proven. To determine the gas cost for calldata, importing the proof, querying, and updating, take this number and multiply it by 5000 (very rough estimate). The gas cost technically isn't linear, since (among other things) the cost of EVM memory increases quadratically, but empirically this estimate seems to hold for reasonable parameter sizes.
 
 For optimistic roll-up applications, proofs only need to be supplied in the case a fraudulent action is detected. If the system is well designed, then game-theoretically the frequency of this should be "never". Because of this, typical gas costs aren't the primary concern. The bigger issue is the worst-case gas usage in the presence of [adversarially selected keys](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that it cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then there is an opportunity for fraud to be committed.
 
