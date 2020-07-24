@@ -331,9 +331,9 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 ![](docs/strands1.svg)
 
-Quadrable's proof structure uses a concept of "strands". This allows us to reduce the proof size when multiple records are to be proved from the same DB. It is similar to an [authentication octopus](https://eprint.iacr.org/2017/933.pdf) except that it works on sparse trees with collapsed leaves, for both inclusion and non-inclusion cases.
+Quadrable's proof structure uses a concept of "strands". This allows us to reduce the proof size when multiple records (inclusion or non-inclusion) are to be proved from the same DB. It is similar to the [authentication octopus algorithm](https://eprint.iacr.org/2017/933.pdf), except that the tentacles can be different lengths which is necessary for our [collapsed leaves](#collapsed-leaves) optimisation, and it doesn't necessarily work from bottom up.
 
-I'm not sure if this is the optimal way to formulate them, but it seems to result in fairly compact proofs. Furthermore, these proofs can be processed with a single pass in resource-constrained environments such as smart contracts. After processing a proof, you end up with a ready-to-use partial-tree.
+The algorithm isn't necessarily optimal, but it seems to result in fairly compact proofs which can be shrunk further with extra proof-time optimisations. Additionally, the proofs can be processed with a single pass in resource-constrained environments such as smart contracts. After processing a proof, you end up with a ready-to-use partial-tree.
 
 Each strand is related to a record whose value (or non-inclusion) is to be proven. Note that in some cases there will be fewer strands than records requested to be proven. This can happen when a witness reveals an empty sub-tree that is sufficient for satisfying a requested non-inclusion proof.
 
@@ -341,21 +341,21 @@ A Quadrable proof includes a list of strands, *sorted by the hashes of their key
 
 * Hash of the key, or (optionally) the key itself
 * Depth
-* Record type
+* Strand type, which is one of the following:
   * Leaf: A regular leaf value, suitable for satisfying a get or update request
   * WitnessLeaf: A leaf value, suitable for proving non-inclusion
-  * Witness: An unspecified node, suitable for proving non-inclusion
-* A value, the meaning of which depends on the record type:
+  * WitnessEmpty: An empty sub-tree, suitable for proving non-inclusion
+* Value, the meaning of which depends on the record type:
   * Leaf: The leaf value (ie the result of a get query)
-  * WitnessLeaf: The hash of the leaf value (allows to prover to create the nodeHash)
-  * Witness: Unused
+  * WitnessLeaf: The hash of the leaf value
+  * WitnessEmpty: Unused
 
-Note that WitnessLeaf nodes must have their keyHash and valueHash included in a proof so the verifier can hash the nodeHash. It is not sufficient to pass in the nodeHash, because this would allow an attacker to take the nodeHash of a branch and present it as a WitnessLeaf. This "Leaf" could then be used to create counterfeit non-inclusion proofs for elements underneath the branch. For a similar reason, if future "WitnessBranch" node types are implemented, the nodeHashes of both children must be provided by the proof.
+Note that WitnessLeaf strands must have their keyHash and valueHash included in a proof so the verifier can compute the nodeHash. It would not be sufficient to pass in the nodeHash, because this would allow an attacker to take the nodeHash of a branch and present it as a WitnessLeaf. This "Leaf" could then be used to create counterfeit non-inclusion proofs for elements underneath the branch. For a similar reason, if future "WitnessBranch" node types are implemented, the nodeHashes of both children must be provided by the proof.
 
 The first thing the verifier should do is run some initial setup on each strand (although this can be done lazily on first access instead, if desired):
 
 * Hash the key (if key was included)
-* Compute the strand's nodeHash: If the record type is Leaf or WitnessLeaf, compute the leaf nodeHash. If Witness, then use the key hash directly for this
+* Compute the strand's nodeHash: If the record type is Leaf or WitnessLeaf, compute the leaf nodeHash. If WitnessEmpty, then the nodeHash is [all-zeros](#sparseness)
 * Set a `merged` boolean value to `false`
 * Set a `next` index value to `i+1` where `i` is the node's index in the list, or an empty sentinel for the last strand (for example `-1`, or the index immediately following the last strand's index). This functions as a singly-linked list of unmerged strands
 
@@ -371,7 +371,7 @@ There are 3 types of commands ("ops"):
 * `HashEmpty`: The same as the previous, but there is no provided witness. Instead, the empty sub-tree nodeHash (32 zero bytes) is used.
 * `Merge`: Take this strand's nodeHash and concatenate and hash it with the nodeHash of the next un-merged strand in the strand list, which can be found by looking at the `next` linked list.
   * Check that the `merged` flag is false in the `next` strand, and that both strands are at the same depth.
-  * After the merge, set `merged` to true in the `next` strand, and unlink it from the linked list.
+  * After the merge, set the `merged` flag to true in the `next` strand, and unlink it from the linked list.
 
 After processing all commands, implementations should check the following:
 
