@@ -70,7 +70,7 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
 
 ## Introduction
 
-* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents a digest of the complete contents of the database, and any modifications to the database will result in a new one. Anyone who knows the root value of a database can perform remote queries on it and be confident that the responses are authentic. To accomplish this, the remote server provides a [proof](#proofs) along with each response, which is validated against the root.
+* *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications will result in a new root. Anyone who knows the root value of a database can perform remote queries on it and be confident that the responses are authentic. To accomplish this, the remote server provides a [proof](#proofs) along with each response, which is validated against the root.
 * *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
@@ -81,7 +81,7 @@ Although not required to use the library, it may help to understand the core dat
 
 Values are authenticated by exporting and importing proofs:
 
-* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs can have some space overhead due to duplicated hashes. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's [proof encoding](#proof-encodings) never includes redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-6 bytes per proved item).
+* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs will contain duplicated hashes which wastes space. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's [proof encoding](#proof-encodings) never includes redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-6 bytes per proved item).
 * *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a "partial-tree" when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you made the same modifications to the full tree. After importing a proof, additional proofs that were exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present (or were proved to *not* be present).
 
 Quadrable is a [Log Periodic](https://logperiodic.com) project.
@@ -115,7 +115,7 @@ You can view a coverage report of the tests by running:
     make coverage
 
 * You will need `lcov` installed.
-* The report will be in this file: `quadrable/coverage-report/index.html`
+* The report will be in this file: `coverage-report/index.html`
 
 
 
@@ -151,14 +151,14 @@ In Quadrable's implementation of a merkle tree, keys are first hashed and then t
 Keys are hashed for multiple reasons:
 
 * It puts a bound on the depth of the tree. Because Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we [collapse leaves](#collapsed-leaves)).
-* Since the hash function used by Quadrable is believed to be cryptographically secure (meaning that it behaves like a [random oracle](https://crypto.stackexchange.com/questions/22356/difference-between-hash-function-and-random-oracle)), the keys should be evenly distributed which reduces the average depth of the tree.
+* Since the hash function used by Quadrable is believed to be cryptographically secure (it behaves like a [random oracle](https://crypto.stackexchange.com/questions/22356/difference-between-hash-function-and-random-oracle)), the keys should be evenly distributed which reduces the average depth of the tree.
 * It is computationally expensive to find two or more distinct keys whose hashes have long common prefixes, which an adversarial user might like to do to increase the cost of traversing the tree or [the proof sizes](#proof-bloating).
 
 
 
 ### Sparseness
 
-Obviously creating a full tree with 2<sup>256</sup> possible leaves is impossible. Fortunately, there is [an optimisation](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this absurd number of nodes. If every empty leaf contains the the same value, then all of the nodes at the next level up will have the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
+Obviously creating a full tree with 2<sup>256</sup> possible leaves is impossible. Fortunately, there is [an optimisation](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this absurd number of nodes. If every empty leaf is encoded with the same value, then all of the nodes at the next level up will share the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
 
 By caching the value of an empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of pre-computing values and caching them for later use instead of re-computing them as needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
 
@@ -176,7 +176,7 @@ The purpose of these changes is to make empty sub-trees at all depths have 32 ze
 * The code is slightly simpler.
 * All-zero roots are user-friendly: It's easy to recognize an empty tree.
 * A run of zeros will compress better, so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
-* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimisations. Specifically, 0 bytes in the calldata is cheaper on gas, contract code size is reduced, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a naive implementation would store the cached empty values in storage as opposed to contract code.
+* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimisations. Specifically, 0 bytes in the calldata are cheaper on gas, contract code size is reduced, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a naive implementation would store the cached empty values in storage as opposed to contract code.
 
 
 ### Collapsed Leaves
@@ -233,7 +233,7 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 ![](docs/bubbling.svg)
 
-**Note**: Creating proofs with sufficient information to support a deletion is not yet implemented. The proof creation code needs to determine which leaf nodes will be bubbled and provide them as separate WitnessLeaf strands. It would also help to implement WitnessBranch strand types to efficiently prove that a sub-tree has two or more children and therefore should not be bubbled.
+**Note**: Creating proofs with sufficient information to support a deletion is not yet implemented. The proof creation code needs to determine which leaf nodes will be bubbled and provide them as separate WitnessLeaf strands. It would also help to implement WitnessBranch strand types to efficiently prove that a sub-tree has two or more children and therefore bubbling can stop at this level.
 
 
 
@@ -289,14 +289,14 @@ However, suppose we want to prove multiple values at the same time. Trivially, w
 
 To prove both of these values independently, the proofs need 8 witnesses in total. However, observe the following:
 
-* Since we are authenticating values from the same tree, the top 2 witnesses will be the same, and are therefore redundant.
+* Since we are authenticating values from the same tree, the 2 witnesses in the second proof will be the same as those in the first proof, and are therefore redundant.
 * On the third level, the node that was sent as a witness in one proof is a computed node in the other proof, and vice versa. Since the verifier is going to be computing these values anyway, there is no need for the proof to contain *any* witnesses for this level.
 
 After taking these observations into account, we see that if we are sending a combined proof for these two leaves, we actually only need to send 4 witnesses:
 
 ![](docs/proof5.svg)
 
-By the way, consider the degenerate case of creating a proof for *all* of the leaves in a tree. In this case, no witnesses need to be sent at all, since the verifier will be constructing the entire tree anyways. Also, nothing additional needs to be sent to prove that a record does not exist, since the verifier has the entire set and can just check to see that it is not present.
+By the way, consider the degenerate case of creating a proof for *all* of the leaves in a tree. In this case, no witnesses need to be sent whatsoever, since the verifier will be constructing the entire tree. Also, nothing additional needs to be sent to prove that a record does *not* exist, since the verifier has the entire set and can just check to see that it is not present.
 
 
 
@@ -388,7 +388,7 @@ Furthermore, a tree structure will be useful when computing a new root after mak
 
 ### Proof encodings
 
-There are a variety of ways that merkle-tree proofs can be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialize this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
+There are a variety of ways that merkle-tree proofs can be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialise this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
 * `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible, but the optimiser still has room for improvement.
 * `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no-keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking).
@@ -437,23 +437,24 @@ Here is how each strand is encoded:
   * `2`: WitnessLeaf
   * `3`: WitnessEmpty
 
+The abstract version of a proof described in the previous section provides each command a strand index to work on. The compact encoding instead maintains a current "working strand" variable that stores an index into the strands. There are jump commands that alter this index, so that subsequent non-jump commands will work on other strands. The initial value of the working strand is the *last* (right-most) strand. This was an arbitrary choice, but usually the strands are worked on starting at the right because left strands survive longer (the left-most one always becomes the final strand).
+
 The encoded commands are 1 byte each, and they do not correspond exactly with the commands described previously, although there is a straightforward conversion between the two. Here are the commands:
 
-           hashing: 0[7 bits hashing details, all 0 == merge]
-    short jump fwd: 100[5 bits distance]   jumps d+1, range: 1 to 32
-    short jump rev: 101[5 bits distance]   jumps -(d+1) range: -1 to -32
-     long jump fwd: 110[5 bits distance]   jumps 2^(d+6) range: 64, 128, 256, 512, ..., 2^37
-     long jump rev: 111[5 bits distance]   jumps -2^(d+6) range: -64, -128, -256, -512, ..., -2^37
+    hashing/merging: 0[7 bits hashing details, all 0 == merge]
+     short jump fwd: 100[5 bits distance]   jumps d+1, range: 1 to 32
+     short jump rev: 101[5 bits distance]   jumps -(d+1) range: -1 to -32
+      long jump fwd: 110[5 bits distance]   jumps 2^(d+6) range: 64, 128, 256, 512, ..., 2^37
+      long jump rev: 111[5 bits distance]   jumps -2^(d+6) range: -64, -128, -256, -512, ..., -2^37
 
-The hashing details are 7 bits that indicate a sequence of either hashing with a provided witness value or an empty sub-tree (32 zero bytes).
+If the most significant bit of a command byte is 0, it is a hashing/merging command. These 7 bits specify a sequence of either hashing with a provided witness value or an empty sub-tree (32 zero bytes).
 
-* Only 6 or fewer of the bits can actually be used for hashing directives. These bytes are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are used (`0` means empty and `1` means provided witness). This way between 1 and 6 hashes can be applied per hashing byte.
+* Only 6 or fewer of the bits can actually be used for hashing directives. These bytes are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are the hashing specifiers: `0` means empty and `1` means provided witness. This way between 1 and 6 hashes can be applied per hashing byte.
 * The witnesses are provided inline, that is they are the 32 bytes directly after the command byte. These 32 bytes are then skipped over and the next command is the following byte (unless more witnesses follow).
 * If all 7 bits in the hashing details are `0` (there is no marker bit) then the command says to merge this strand with the next unmerged strand (which can be found via the `next` linked list). In the `next` strand, `merged` is set to true and this strand is unlinked.
 
-The decoding algorithm keeps a variable that stores an index into the strands. This is the current "working strand". The jump commands alter this index, so that subsequent hashing commands can work on other strands.
+If the most significant bit is `1` in a command byte, it is a jump:
 
-* The initial value of the working strand is the *last* (right-most) strand. This was an arbitrary choice, but usually the strands are worked on starting at the right, because left strands survive longer (the left-most one always becomes the final strand).
 * The short jumps simply add one to the 5 bit distance and add or subtract this from the working strand
 * The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows a proof to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
 * Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap around", which could allow some clever encoding-time optimisations, but the added complexity didn't seem worth it.
