@@ -712,7 +712,7 @@ Although semantically `quadb fork` acts like it copies the tree pointed to by th
 
 If no head name is passed in to `quadb fork`, it will fork to a [detached head](#heads).
 
-`quadb fork` can optionally take `--from` option which represents the head to be forked from, instead of using the current head.
+`quadb fork` can take a `--from` option which represents the head to be forked from, instead of using the current head.
 
 ### quadb stats
 
@@ -958,11 +958,11 @@ Now that you have authenticated the partial tree created from the proof, you can
 
 If you need to access a value multiple times, it is preferable to store the result in memory so you don't need to call `Quadrable.get()` multiple times (which is [expensive](#gas-usage)).
 
-Finally, you can modify the tree with `Quadrable.put()`. This will return a new `rootNodeAddr`, which you should save:
+Finally, you can modify the tree with `Quadrable.put()`. This will return a new `rootNodeAddr`, which you should use to overwrite the old root node address (since it is no longer valid):
 
     rootNodeAddr = Quadrable.put(rootNodeAddr, keyHash, "new val");
 
-`Quadrable.getNodeHash()` can be used to retrieve the updated root incorporating your modifications:
+`Quadrable.getNodeHash()` can now be used to retrieve the updated root incorporating your modifications:
 
     bytes32 newTrustedRoot = Quadrable.getNodeHash(rootNodeAddr);
 
@@ -970,7 +970,7 @@ Finally, you can modify the tree with `Quadrable.put()`. This will return a new 
 
 ### Memory Layout
 
-See the [Strands](#strands) section for details on how the proof decoding algorithm works. The solidity implementation is similar to the C++ implementation, except that it does not decode the proof to an intermediate format prior to processing. Instead, it directly processes the encoded proof for efficiency reasons.
+See the [Strands](#strands) section for details on how the proof decoding algorithm works. The Solidity implementation is similar to the C++ implementation, except that it does not decode the proof to an intermediate format prior to processing. Instead, it directly processes the encoded proof for efficiency reasons.
 
 Because the number of strands is not known in advance and Solidity does not support resizing dynamic memory arrays, the function that parses the strands is careful to not allocate any memory in order to support processing the proof in a single pass. As it executes it builds up a contiguous array of strand elements. Each strand element contains a 32-byte strandState, a keyHash, and a node that will store the leaf for this strand (if any):
 
@@ -999,10 +999,10 @@ Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-by
 
 * Only the `CompactNoKeys` proof encoding is supported. This means that enumeration by key is not possible.
 * Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string). The proof creation code also needs to be updated to be able to create deletion-capable proofs (see [bubbling](#bubbling)).
-* The Solidity implementation does *not* use [copy-on-write](#copy-on-write), so multiple versions of the tree can not exist simultaneously. Instead, the tree is updated in-place during modifications (nodes are reused when possible). This is done to limit the amount of memory consumed.
-* Unlike the C++ implementation operations are not [batched](#operation-batching). This is complicated to do in Solidity because dynamic memory management is difficult. Nevertheless, this may be an area for future optimisation.
+* The Solidity implementation does *not* use [copy-on-write](#copy-on-write), so multiple versions of the tree can not exist simultaneously. Instead, the tree is updated in-place during modifications (nodes are reused when possible). After a `put()`, the old root node address becomes invalid. This is done to limit the amount of memory consumed.
+* Unlike the C++ implementation operations can not be [batched](#operation-batching). This is complicated to do in Solidity because dynamic memory management is difficult. Nevertheless, this may be an area for future optimisation.
 * Proofs cannot be created by the Solidity implementation. This should not be necessary for most use-cases.
-* Large proofs can have [excessive gas costs](#gas-usage).
+* Importing large proofs can have [high gas costs](#gas-usage).
 
 
 ### Gas Usage
@@ -1015,7 +1015,7 @@ There are several variables than impact the gas usage of the library:
 * Proportion of inclusion versus non-inclusion proofs
 * Length of values
 
-Following is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. A single element is selected to be proven (an inclusion proof). The proof size is recorded and this is used to estimate calldata costs. Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
+The following is a generated table of gas costs for a simple scenario. For each row, a DB of size N is created with effectively random keys. A single element is selected to be proven (an inclusion proof). The proof size is recorded and this is used to estimate calldata costs. Then the gas costs are measured by the test harness for 3 operations: Importing the proof, looking up the value in the partial tree, and updating the value and computing a new root.
 
 | DB Size | Average Depth | Calldata (gas) | Import (gas) | Query (gas) | Update (gas) | Total (gas) |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1051,7 +1051,7 @@ In general, the gas cost is proportional to the number of witnesses in the proof
 
 For optimistic roll-up applications, proofs only need to be supplied in the case a fraudulent action is detected. If the system is well designed, then game-theoretically the frequency of this should be "never". Because of this, typical gas costs aren't the primary concern. The bigger issue is the worst-case gas usage in the presence of [adversarially selected keys](#proof-bloating). If an attacker manages to make it so costly for the system to verify a fraud proof that it cannot be done within the block-gas limit (the maximum gas that a transaction can consume, at any cost), then there is an opportunity for fraud to be committed.
 
-Let's assume that an attacker can create colliding keyHashes up to a depth of 160 for every element to be proven. This would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. In order to leave a very wide security margin, this suggests that fraud-proof systems should try to use under 15 values for each unit of verification (assuming other gas costs are negligible).
+Let's assume that an attacker can create colliding keyHashes up to a depth of 160 for every element to be proven. Each of these would be extremely computationally expensive -- on the same order as finding distinct private keys with colliding bitcoin/ethereum addresses. In this case, calldata+import+query+update would take around 800k gas for each value. At the time of this writing, the gas block limit is 12.5m, which suggests that around 15 of these worst-case scenario values could be verified. In order to leave a very wide security margin, this suggests that fraud-proof systems should try to use under 15 values for each unit of verification (assuming other gas costs are negligible).
 
 
 ## Author and Copyright
