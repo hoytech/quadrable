@@ -50,6 +50,7 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
   * [quadb exportProof](#quadb-exportproof)
   * [quadb importProof](#quadb-importproof)
   * [quadb mergeProof](#quadb-mergeproof)
+  * [quadb gc](#quadb-gc)
 * [C++ Library](#c-library)
   * [LMDB Environment](#lmdb-environment)
   * [Character Encoding](#character-encoding)
@@ -81,7 +82,7 @@ Although not required to use the library, it may help to understand the core dat
 
 Values are authenticated by exporting and importing proofs:
 
-* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs will contain duplicated hashes which wastes space. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's [proof encoding](#proof-encodings) never includes redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-6 bytes per proved item).
+* *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs will contain duplicated hashes which wastes space. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's [proof encoding](#proof-encodings) never includes redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-6 bytes per proved item, not including sibling hashes).
 * *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a "partial-tree" when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you made the same modifications to the full tree. After importing a proof, additional proofs that were exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present (or were proved to *not* be present).
 
 Quadrable is a [Log Periodic](https://logperiodic.com) project.
@@ -158,7 +159,7 @@ Keys are hashed for multiple reasons:
 
 ### Sparseness
 
-Obviously creating a full tree with 2<sup>256</sup> possible leaves is impossible. Fortunately, there is [an optimisation](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this absurd number of nodes. If every empty leaf is encoded with the same value, then all of the nodes at the next level up will share the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so on.
+Obviously creating a full tree with 2<sup>256</sup> possible leaves is impossible. Fortunately, there is [an optimisation](https://www.links.org/files/RevocationTransparency.pdf) that lets us avoid creating this absurd number of nodes. If every empty leaf is encoded with the same value, then all of the nodes at the next level up will share the same hash. And since all these nodes have the same hashes, the nodes on the next level up from there will also have the same hashes, and so forth.
 
 By caching the value of an empty sub-tree at depth N, we can easily compute the hash of the empty sub-tree at depth N-1. The technique of pre-computing values and caching them for later use instead of re-computing them as needed is called [dynamic programming](https://skerritt.blog/dynamic-programming/) and has been successfully applied to many graph and tree problems.
 
@@ -289,7 +290,7 @@ However, suppose we want to prove multiple values at the same time. Trivially, w
 
 To prove both of these values independently, the proofs need 8 witnesses in total. However, observe the following:
 
-* Since we are authenticating values from the same tree, the 2 witnesses in the second proof will be the same as those in the first proof, and are therefore redundant.
+* Since we are authenticating values from the same tree, the top two witnesses in the second proof will be the same as the top two in the first proof, and are therefore redundant.
 * On the third level, the node that was sent as a witness in one proof is a computed node in the other proof, and vice versa. Since the verifier is going to be computing these values anyway, there is no need for the proof to contain *any* witnesses for this level.
 
 After taking these observations into account, we see that if we are sending a combined proof for these two leaves, we actually only need to send 4 witnesses:
@@ -323,7 +324,7 @@ Both of these methods are proved in the same way as inclusion proofs: There is a
 
 In fact, at the proof level there is no such thing as a non-inclusion proof. The proofs provide just enough information for the verifier to construct a tree that they can use to determine the key they are interested in does not exist.
 
-Witness leaves are like regular proof-of-inclusion leaves except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value (which could be large). Instead, they merely wish to prove that it is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible for a leaf to be used for a non-inclusion proof instead of a witness leaf. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
+Witness leaves are like regular proof-of-inclusion leaves except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value (which could be large). Instead, the verifier merely wishes to ensure that this other leaf is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible for a leaf to be used for a non-inclusion proof instead of a witness leaf. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
 
 
 
@@ -332,7 +333,7 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 ![](docs/strands1.svg)
 
-Quadrable's proof structure uses a concept of "strands". This allows us to reduce the proof size when multiple records (inclusion or non-inclusion) are to be proved from the same DB. It is similar to the [authentication octopus algorithm](https://eprint.iacr.org/2017/933.pdf), except that the tentacles can be different lengths which is necessary for our [collapsed leaves](#collapsed-leaves) optimisation. Also, it doesn't necessarily work from bottom up (this is up to the proof encoder).
+Quadrable's proof structure uses a concept of "strands". This allows us to reduce the proof size when multiple records (inclusion or non-inclusion) are to be proved from the same DB. It is similar to the [authentication octopus algorithm](https://eprint.iacr.org/2017/933.pdf), except that the tentacles can be different lengths which is necessary for our [collapsed leaves](#collapsed-leaves) optimisation. Also, it doesn't necessarily work on all the strands from the bottom up (this is up to the proof encoder, which usually works on one strand as much as possible before switching to another).
 
 The algorithm isn't necessarily optimal, but it seems to result in fairly compact proofs which can be shrunk further with extra proof-time optimisations. Additionally, the proofs can be processed with a single pass in resource-constrained environments such as smart contracts. After processing a proof, you end up with a ready-to-use partial-tree.
 
@@ -395,7 +396,7 @@ There are a variety of ways that merkle-tree proofs can be encoded (whether usin
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate the encoding type of an encoded proof, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
 
-Unlike the C++ implementation which has the `quadrable::Proof` intermediate representation of proofs, the Solidity implementation directly processes the compact encoding.
+Unlike the C++ implementation which first decodes to the `quadrable::Proof` intermediate representation, the Solidity implementation directly processes the compact encoding.
 
 
 
@@ -450,13 +451,13 @@ The encoded commands are 1 byte each, and they do not correspond exactly with th
 If the most significant bit of a command byte is 0, it is a hashing/merging command. These 7 bits specify a sequence of either hashing with a provided witness value or an empty sub-tree (32 zero bytes).
 
 * Only 6 or fewer of the bits can actually be used for hashing directives. These bytes are padded with `0` bits, starting from the *least* significant bit, until a marker `1` bit is seen. The remaining bits are the hashing specifiers: `0` means empty and `1` means provided witness. This way between 1 and 6 hashes can be applied per hashing byte.
-* The witnesses are provided inline, that is they are the 32 bytes directly after the command byte. These 32 bytes are then skipped over and the next command is the following byte (unless more witnesses follow).
+* The witnesses are provided inline, that is they are the 32 bytes directly after the command byte. These 32 bytes are then skipped over and the next command is the following byte (unless more witnesses follow in this same command).
 * If all 7 bits in the hashing details are `0` (there is no marker bit) then the command says to merge this strand with the next unmerged strand (which can be found via the `next` linked list). In the `next` strand, `merged` is set to true and this strand is unlinked.
 
 If the most significant bit is `1` in a command byte, it is a jump:
 
-* The short jumps simply add one to the 5 bit distance and add or subtract this from the working strand
-* The long jumps add `6` to the distance, and adds or subtracts that power of two from the working strand. This allows a proof to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
+* A short jump adds 1 to the distance and adds/subtracts this from the working strand
+* A long jump adds 6 to the distance, and adds/subtracts that power of two from the working strand. This allows a proof to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
 * Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap around", which could allow some clever encoding-time optimisations, but the added complexity didn't seem worth it.
 
 
@@ -479,7 +480,7 @@ Depending on the protocol though, there may be more value in generating partial 
 
 There is a `quadb mineHash` command to help brute force search for a key that has a specific hash prefix. This is useful when writing tests for Quadrable, so that you can build up the exact tree you need.
 
-One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send empty sub-tree witnesses along with a proof. A single bit suffices to indicate whether a provided witness should be used, or a default hash instead. The nice thing about this is that finding a single long shared keyHash prefix for two keys doesn't really bloat the proof size that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). So summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (and in the birthday attack case they might get this as a free side effect).
+One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send empty sub-tree witnesses along with a proof. A single bit suffices to indicate whether a provided witness should be used, or a default hash instead. The nice thing about this is that finding a single long shared keyHash prefix for two keys doesn't really bloat the proof size that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). Summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (and in the birthday attack case they might get this as a free side effect).
 
 
 
@@ -510,7 +511,7 @@ Quadrable's C++ implementation uses the [Lightning Memory-mapped Database](https
 
 LMDB is a B+ tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB. Compared to LevelDB, LMDB has better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers real ACID transactions and multi-process access (in addition to multi-thread), and is less likely to suffer data corruption.
 
-LMDB supports multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a single transaction), and because our nodes are more granular than LMDB's B+ tree pages.
+LMDB supports multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a transaction), and because our nodes are more granular than LMDB's B+ tree pages.
 
 ### nodeId
 
@@ -747,7 +748,7 @@ Let's add a new key and delete an existing one from our current branch, then run
 Now the diff shows one line per modification. If the modification was an insertion or update, the the first character will be `+` and the key/value will be the new record to be set. If it was a deletion, the first character will be `-` and the key/value will be the old record that has been removed.
 
 * You can change the separator using the `--sep` option, just as with `import`/`export`.
-* If two trees have been forked from one another recently, then diffs will be very fast. This is because the algorithm will detect shared portions of the tree and not bother diffing them. Diffing two trees that don't share structure (for example, if they were separately `import`ed from the same data) will still work, but will run slower. In the future we may implement a `dedup` command that uses `diff` to detect equal but unshared structure and make them shared.
+* If two trees have been forked from one another recently, then diffs will be very fast. This is because the command will detect shared portions of the tree and not bother diffing them. Diffing two trees that don't share structure (for example, if they were separately `import`ed from the same data) will still work, but will run slower. In the future we may implement a `dedup` command that uses `diff` to detect equal but unshared structure and make them shared.
 
 ### quadb patch
 
@@ -797,7 +798,12 @@ After importing a proof, if you receive additional proofs against the same datab
 * On success, queries/updates/proofs can access any of the records in either proof.
 * `--hex` must be used if the proof is in hexadecimal.
 
+### quadb gc
 
+This performs a [garbage collection](#garbage-collection) on the database. It deletes nodes that are no longer accessible from any head, and reports basic statistics:
+
+    $ ./quadb gc
+    Collected 4995/7502 nodes
 
 
 
@@ -878,7 +884,7 @@ Suppose you'd like to update two keys in the DB. You can do this by calling the 
 
 However, this is not optimal. Each call to `put` must traverse the DB tree to find the location where the updated value should live, and then construct new nodes along the entire path back to the root. If the hashes of the values share any common prefix bits, then intermediate nodes created by the first `put` will be thrown away and recreated by the second `put`. At the very least, a root node will be created and thrown away.
 
-Instead, it is more efficient to use the `change()` method, which returns an `UpdateSet`, make the desired changes on this temporary object, and then `apply()` it to the database:
+Instead, it is more efficient to use the `change()` method, which returns a `quadrable::UpdateSet`. Make the desired changes on this temporary object and then `apply()` it to the database:
 
     db.change()
       .put("key1", "val1")
@@ -908,13 +914,13 @@ Use the following to avoid unnecessary tree traversals:
     auto recs = db.get(txn, { "key1", "key2", });
     if (recs["key1"].exists) std::cout << recs["key1"].val;
 
-**Important**: In both of the above cases, the values are [string_view](https://github.com/hoytech/lmdbxx#string_view)s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort (whichever comes first). If you need to keep a value around longer, put it into a string, which copies the data to your program's heap:
+**Important**: In both of the above cases, the values are [string_view](https://github.com/hoytech/lmdbxx#string_view)s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort (whichever comes first). If you need to keep a value around longer, put it into a string. This copies the data to your program's heap:
 
     std::string key1ValCopy(recs["key1"].val);
 
 ### Garbage Collection
 
-The `GarbageCollector` class can be used to deallocate unneeded nodes. See the implementation in `quadb.cpp`.
+The `GarbageCollector` class can be used to deallocate unneeded nodes. See the implementation of [quadb gc](quadb-gc) in `quadb.cpp`.
 
 * `gc.markAllHeads()` will mark all the heads stored in the `quadrable_head` table. But if you have other roots stored you would like to preserve you can mark them with `gc.markTree()`. Both of these methods can be called inside a read-only transaction.
 * When you are done marking nodes, call `gc.sweep()`. This must be done inside a read-write transaction. All nodes that weren't found during the mark phase are deleted.
