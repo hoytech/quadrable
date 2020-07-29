@@ -802,7 +802,7 @@ After importing a proof, if you receive additional proofs against the same datab
 
 This performs a [garbage collection](#garbage-collection) on the database. It deletes nodes that are no longer accessible from any head, and reports basic statistics:
 
-    $ ./quadb gc
+    $ quadb gc
     Collected 4995/7502 nodes
 
 
