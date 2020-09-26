@@ -177,7 +177,7 @@ The purpose of these changes is to make empty sub-trees at all depths have 32 ze
 * The code is slightly simpler.
 * All-zero roots are user-friendly: It's easy to recognize an empty tree.
 * A run of zeros will compress better, so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
-* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimisations. Specifically, 0 bytes in the calldata are cheaper on gas, contract code size is reduced, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a naive implementation would store the cached empty values in storage as opposed to contract code.
+* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimisations. Specifically, 0 bytes in the calldata are cheaper on gas, contract code size is reduced because pre-calculated empty node values can be omitted, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a naive implementation would cache empty values in storage as opposed to contract code.
 
 
 ### Collapsed Leaves
@@ -265,7 +265,7 @@ At this point you have a value, but you can't be sure that it wasn't tampered wi
 
 In order to convince you that the record exists and is correct, the provider must send a proof along with the JSON. You can use this proof to re-compute the root hash and see if it matches the trusted root hash you acquired earlier. First compute the leaf hash. In Quadrable you do that by hashing the JSON value and combining it with the key's hash (see [collapsed leaves](#collapsed-leaves)).
 
-Next, you must compute the hash of the leaf's parent node. To compute this you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This is solved by sending this value (called a *witness*) as part of the proof:
+Next, you must compute the hash of the leaf's parent node. To compute this you need to know the hash of the leaf's sibling node, since the parent is the hash of the concatenation of these two children. This is solved by having the provider send this value (called a *witness*) as part of the proof:
 
 ![](docs/proof2.svg)
 
@@ -480,7 +480,7 @@ Depending on the protocol though, there may be more value in generating partial 
 
 There is a `quadb mineHash` command to help brute force search for a key that has a specific hash prefix. This is useful when writing tests for Quadrable, so that you can build up the exact tree you need.
 
-One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send empty sub-tree witnesses along with a proof. A single bit suffices to indicate whether a provided witness should be used, or a default hash instead. The nice thing about this is that finding a single long shared keyHash prefix for two keys doesn't really bloat the proof size that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). Summing the repeated fraction indicates that that saturating the witnesses only approximately doubles an attacker's work (and in the birthday attack case they might get this as a free side effect).
+One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send empty sub-tree witnesses along with a proof. A single bit suffices to indicate whether a provided witness should be used, or a default hash instead. The nice thing about this is that finding a single long shared keyHash prefix for two keys doesn't really bloat the proof size that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). Summing the repeated fraction indicates that saturating the witnesses only approximately doubles an attacker's work (and in the birthday attack case they might get this as a free side effect).
 
 
 
@@ -897,6 +897,8 @@ In this case, all the modifications will be made with a single traversal of the 
       .del("oldKey")
       .put("newKey", "val")
       .apply(txn);
+
+You can update a key multiple times within the same UpdateSet. The latest update will overwrite the previous updates. This can allow replaying modifications from some sort of log without needing to rebuild the merkle tree as you go. The hashing will only get done when you finally apply it.
 
 #### Batched Gets
 
