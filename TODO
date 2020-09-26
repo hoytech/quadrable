@@ -1,8 +1,14 @@
 lib
   ! tests for diff and mergeProof
+
   - proof suitable for deletion (uses witnessLeafs instead of witnesses where necessary)
     - WitnessBranch
   - warn when exporting partial tree
+  - changeable hash function
+  - allow bypassing hash function when computing keys
+    ? authenticated "array" - maybe varints as keys
+  - de-dup trees using diff functionality
+
   ? ability to compact tree to ensure node Ids are sequential
   ? try putting leaves in their own node key-space to improve locality of interior nodes
   ? maybe way to avoid needing to store stuff in lmdb to validate a proof?
@@ -10,7 +16,5 @@ lib
   ? ability to discard intermediate nodes to save disk-space, since they can be re-computed
 
 solidity impl
-
-docs
-  - adversarial proof bloating
-    - mine 2 values with common N-bit prefix (can use birthday attacks)
+  - batched updates
+  - deletion
