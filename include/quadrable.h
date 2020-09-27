@@ -858,7 +858,7 @@ class Quadrable {
             if (node.leftNodeId) reverseMap.emplace(node.leftNodeId, nodeId);
             if (node.rightNodeId) reverseMap.emplace(node.rightNodeId, nodeId);
 
-            // If one side is empty and the other side has strandents to prove, don't go down the empty side.
+            // If one side is empty and the other side has strands to prove, don't go down the empty side.
             // This avoids unnecessary empty witnesses, since they will be satisfied with HashEmpty cmds from the other side.
 
             if (node.leftNodeId || middle == end) exportProofAux(txn, depth+1, node.leftNodeId, nodeId, begin, middle, items, reverseMap);
@@ -1014,7 +1014,7 @@ class Quadrable {
             if (cmd.nodeOffset >= proof.strands.size()) throw quaderr("nodeOffset in cmd is out of range");
             auto &accum = accums[cmd.nodeOffset];
 
-            if (accum.merged) throw quaderr("strandent already merged");
+            if (accum.merged) throw quaderr("strand already merged");
             if (accum.depth == 0) throw quaderr("node depth underflow");
 
             BuiltNode siblingInfo;
