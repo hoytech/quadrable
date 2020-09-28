@@ -61,6 +61,51 @@ class Hash {
         return h;
     }
 
+    static Hash fromInteger(uint64_t n) {
+        if ((n & (1ULL << 63))) throw quaderr("int range exceeded");
+
+        uint64_t bits = n ? __builtin_clzll(n) : 0;
+
+        uint64_t encoded = n - (1ULL << (63 - bits));
+        encoded <<= (bits + 1);
+        encoded |= 1ULL << bits;
+
+        Hash h = nullHash();
+
+        h.data[0] = (encoded >> (64 - 8)) & 0xFF;
+        h.data[1] = (encoded >> (64 - 8*2)) & 0xFF;
+        h.data[2] = (encoded >> (64 - 8*3)) & 0xFF;
+        h.data[3] = (encoded >> (64 - 8*4)) & 0xFF;
+        h.data[4] = (encoded >> (64 - 8*5)) & 0xFF;
+        h.data[5] = (encoded >> (64 - 8*6)) & 0xFF;
+        h.data[6] = (encoded >> (64 - 8*7)) & 0xFF;
+        h.data[7] = encoded & 0xFF;
+
+        return h;
+    }
+
+    uint64_t toInteger() {
+        if (std::any_of(data + 8, data + sizeof(data), [](uint8_t c){ return c != 0; })) throw quaderr("hash is not in integer format");
+
+        uint64_t encoded;
+
+        encoded = data[0];
+        encoded = (encoded << 8) | data[1];
+        encoded = (encoded << 8) | data[2];
+        encoded = (encoded << 8) | data[3];
+        encoded = (encoded << 8) | data[4];
+        encoded = (encoded << 8) | data[5];
+        encoded = (encoded << 8) | data[6];
+        encoded = (encoded << 8) | data[7];
+
+        uint64_t bits = encoded ? __builtin_ctzll(encoded) : 0;
+
+        uint n = encoded >> (bits + 1);
+        n += (1ULL << (63 - bits));
+
+        return n;
+    }
+
     static Hash existingHash(std::string_view s) {
         Hash h;
 
