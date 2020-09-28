@@ -981,4 +981,5 @@ int main() {
     }
 
     std::cout << "\nAll tests OK" << std::endl;
+    return 0;
 }
