@@ -24,8 +24,10 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
   * [Strands](#strands)
   * [Commands](#commands)
   * [Proof encodings](#proof-encodings)
-  * [Compact encoding](#compact-encoding)
+    * [External representation](#external-representation)
   * [Proof bloating](#proof-bloating)
+* [Integer Keys](#integer-keys)
+  * [Pushable Logs](#pushable-logs)
 * [Storage](#storage)
   * [Copy-On-Write](#copy-on-write)
   * [LMDB](#lmdb)
@@ -37,6 +39,7 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
   * [quadb init](#quadb-init)
   * [quadb status](#quadb-status)
   * [quadb put](#quadb-put)
+  * [quadb push](#quadb-push)
   * [quadb get](#quadb-get)
   * [quadb del](#quadb-del)
   * [quadb import](#quadb-import)
@@ -58,9 +61,14 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
   * [Operation Batching](#operation-batching)
     * [Batched Updates](#batched-updates)
     * [Batched Gets](#batched-gets)
+  * [Pushing](#pushing)
+  * [Exporting/Importing Proofs](#exporting/importing-proofs)
   * [Garbage Collection](#garbage-collection)
 * [Solidity](#solidity)
   * [Smart Contract Usage](#smart-contract-usage)
+    * [get](#get)
+    * [put](#put)
+    * [push](#push)
   * [Memory Layout](#memory-layout)
   * [Limitations of Solidity Implementation](#limitations-of-solidity-implementation)
   * [Gas Usage](#gas-usage)
@@ -239,6 +247,11 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 
 
+
+
+
+
+
 ## Proofs
 
 So far the data-structure we've described is just an expensive way to store a tree of data. The reason why we're doing all this hashing in the first place is so that we can create *proofs* about the contents of our tree.
@@ -391,8 +404,8 @@ Furthermore, a tree structure will be useful when computing a new root after mak
 
 There are a variety of ways that merkle-tree proofs can be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialise this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
-* `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible, but the optimiser still has room for improvement.
-* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no-keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking).
+* `HashedKeys` (0): An encoding where the hashes of keys are included in the proof. Each "hash" is prefixed with a byte that incidicates the number of trailing 0 bytes in the hash. This is useful for keys that aren't actually hashes, in particular integer keys.
+* `FullKeys` (1): Full keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no-keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking). These proofs can only be created from a tree that has key tracking enabled.
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate the encoding type of an encoded proof, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
 
@@ -400,8 +413,7 @@ Unlike the C++ implementation which first decodes to the `quadrable::Proof` inte
 
 
 
-
-### Compact encoding
+#### External representation
 
 The first byte is the version byte described above, followed by serialised lists of strands and commands:
 
@@ -409,7 +421,7 @@ The first byte is the version byte described above, followed by serialised lists
     [ProofStrand]+
     [ProofCmd]*
 
-* The sort order is significant for both lists. For strands it must be sorted by keyHash (even with `CompactWithKeys` proofs where keys are included instead of keyHashes). For commands the order is the sequence that the commands will be processed.
+* The sort order is significant for both lists. For strands it must be sorted by keyHash (even with `FullKeys` proofs where keys are included instead of keyHashes). For commands the order is the sequence that the commands will be processed.
 * At the end of the lists of strands, a special "Invalid" strand signifies the end of the strand list, and that the commands follow.
 * The commands are just processed until the end of the encoded string.
 
@@ -418,20 +430,24 @@ Here is how each strand is encoded:
     [1 byte strand type, Invalid means end of strands]
     [1 byte depth]
     if Leaf
-      if CompactNoKeys:
+      if HashedKeys:
+        [1 byte number trailing 0s in keyHash]
         [32 byte keyHash]
-      else if CompactWithKeys:
+      else if FullKeys:
         [varint size of key]
         [N-byte key]
       [varint size of val]
       [N-byte val]
     else if WitnessLeaf
+      [1 byte number trailing 0s in keyHash]
       [32 byte keyHash]
       [32 byte valHash]
     else if WitnessEmpty
+      [1 byte number trailing 0s in keyHash]
       [32 byte keyHash]
 
 * A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is the base 128 integer with the fewest possible digits, most significant digit first, with the most significant bit set on all but the last digit.
+* The "number of trailing 0s" fields affect the following keyHashes which allows keyHashes to take up less space if they have trailing 0 bytes. This is useful for (pushable logs)[pushable-logs] since they use integer keys which are much shorter than hashes.
 * The strand types are as follows:
   * `0`: Leaf (chosen to be 0 since this is probably the most common, and 0 bytes are cheaper in Ethereum calldata)
   * `1`: Invalid
@@ -481,6 +497,32 @@ Depending on the protocol though, there may be more value in generating partial 
 There is a `quadb mineHash` command to help brute force search for a key that has a specific hash prefix. This is useful when writing tests for Quadrable, so that you can build up the exact tree you need.
 
 One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send empty sub-tree witnesses along with a proof. A single bit suffices to indicate whether a provided witness should be used, or a default hash instead. The nice thing about this is that finding a single long shared keyHash prefix for two keys doesn't really bloat the proof size that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). Summing the repeated fraction indicates that saturating the witnesses only approximately doubles an attacker's work (and in the birthday attack case they might get this as a free side effect).
+
+
+
+
+## Integer Keys
+
+Quadrable includes some convenience wrappers for efficiently using the sparse merkle tree with integer keys. In this case, the keys are *not* hashed prior to inserting into the tree. Instead, there is a special encoding for integers that places the integers in a convenient layout within the tree.
+
+![](docs/integer-keys.svg)
+
+The key layout works by have a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits are used for which sub-tree to select. This layout was chosen for the following properties:
+
+* The items are sorted in the tree by key. As well as allowing in-order iteration, proofs for adjacent keys becomes much smaller because of Quadrable's [combined proofs](#combined-proofs) algorithm.
+* Up to `2^64 - 3` items are supported.
+* Trees aren't excessively deep when the number of items is small. An alternative approach might be to use the full 64-bits of an integer as a key (MSB first), however this would create a tree of depth 64, even with only 2 elements.
+
+### Pushable Logs
+
+A common use-case for integer keys is to maintain an appendable list, also known as a *log*. To append items you should use the `push` methods which will manage a special *next pushable index* field. This field contains an increasing integer that can be used to find the next index available to be pushed to.
+
+In order to create a proof that can be pushed onto, set the `pushable` parameter of `exportProofInteger` to `true`, or pass the `--pushable` flag to `quadb exportProof`. This adds the following to the proof (in addition to any other indices you requested):
+
+* Adds an inclusion proof for the next pushable index field (or a non-inclusion if it's not yet set)
+* Adds a non-inclusion proof for the value stored in the next pushable index field (or `0` if next pushable not yet set)
+
+Partial trees that are constructed from these proofs allow an unlimited number of elements to be pushed on.
 
 
 
@@ -616,6 +658,12 @@ Unless the value was the same as a previously existing one, the current head wil
     $ quadb status
     Head: master
     Root: 0x0b84df4f4677733fe0956d3e4853868f54a64d0f86ecfcb3712c18e29bd8249c (1)
+
+### quadb push
+
+This pushes a value into the database and updates the (next pushable index)[#pushable-logs]:
+
+    $ quadb push val
 
 ### quadb get
 
@@ -766,7 +814,7 @@ This command constructs an encoded proof for the supplied keys against the curre
     0x0000030e42f327ee3cfa7ccfc084a0bb68d05eb627610303012a67afbf1ecd9b0d32fa0568656c6c6f0201b5553de315e0edf504d9150af82dafa5c4667fa618ed0a6f19c69b41166c55100b42b6393c1f53060fe3ddbfcd7aadcca894465a5a438f69c87d790b2299b9b201a030ffe62a3cecb0c0557a8f4c2d648c7407bb5e90e2bd490e97e3447a0d4c081b7400
 
 * The list of keys to prove should be provided as arguments. They can be keys that exist in the database (in which case their values are embedded into the proof), or keys that don't (in which case a non-inclusion proof is sent).
-* The default [proof encoding](#proof-encodings) is `CompactNoKeys`, but this can be changed with `--format`.
+* The default [proof encoding](#proof-encodings) is `HashedKeys`, but this can be changed with `--format`.
 * `--hex` causes the output to be in hexadecimal (with a `0x` prefix). By default raw binary data will be printed.
 * The example above puts the keys after `--`. This is in case you have a key beginning with `-` it won't be interpreted as an option.
 * `--dump` prints a human-readable version of the proof (pre-encoding). This can be helpful for debugging.
@@ -786,7 +834,7 @@ If the proof is in hex and is stored in a file `my-proof`, import it like this:
 The tree can now be read from and updated as usual, as long as no un-proved records are accessed (if they are, an error will be thrown). Proofs can also be exported *from* this partial-tree.
 
 * `--hex` must be used if the proof is in hexadecimal.
-* [Enumeration by key](#key-tracking) is only possible if the `CompactWithKeys` proof encoding was specified.
+* [Enumeration by key](#key-tracking) is only possible if the `FullKeys` proof encoding was specified.
 
 ### quadb mergeProof
 
@@ -916,9 +964,54 @@ Use the following to avoid unnecessary tree traversals:
     auto recs = db.get(txn, { "key1", "key2", });
     if (recs["key1"].exists) std::cout << recs["key1"].val;
 
-**Important**: In both of the above cases, the values are [string_view](https://github.com/hoytech/lmdbxx#string_view)s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort (whichever comes first). If you need to keep a value around longer, put it into a string. This copies the data to your program's heap:
+If you are using [integer keys](#integer-keys) pass `uint64_t`s to get instead:
+
+    std::string_view val;
+    bool exists = db.get(txn, 1000, val);
+
+**Important**: In all of the above cases, the values are [string_view](https://github.com/hoytech/lmdbxx#string_view)s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort (whichever comes first). If you need to keep a value around longer, put it into a string. This copies the data to your program's heap:
 
     std::string key1ValCopy(recs["key1"].val);
+
+### Pushing
+
+In order to push elements onto the database to implement a [pushable log](#pushable-logs), you can use the `push` method:
+
+    db.change()
+      .push(txn, "val1")
+      .push(txn, "val2")
+      .apply(txn);
+
+Note that unlike `.put()` and `.del()`, a transaction must be passed to `push`. This is because it needs to read the next pushable index from the database. The transaction must be the same as the one eventually passed to `apply`.
+
+
+### Exporting/Importing Proofs
+
+The `exportProof` function creates inclusion/non-inclusion proofs for the specified keys. You can then use the `encodeProof` function to encode it to the compact external representation:
+
+    auto proof = db.exportProof(txn, { "key1", "key2", });
+
+    std::string encodedProof = quadrable::proofTransport::encodeProof(proof);
+
+The second argument to `exportProof` is a `std::set<std::string>` so you can build up the list of keys programmatically if you desire.
+
+The complement function is called `importProof`:
+
+    auto proof = quadrable::proofTransport::decodeProof(encodedProof);
+
+    db.importProof(txn, proof, trustedRoot);
+
+If the resulting partial tree root does not match `trustedRoot` then an exception will be thrown and your head will not be altered. You can omit this argument to avoid this check, although be aware that you are importing an unverified proof if you do this.
+
+On success, your head will point to the partial tree resulting from the proof. Queries for the specified keys (`key1` and `key2`) will succeed (even if they are not in the database -- that is a non-inclusion proof), and queries for other keys will throw exceptions.
+
+In order to prove integer keys, you use the `exportProofInteger` method instead:
+
+    auto proof = db.exportProof(txn, { 100, 101, 102, 103, }, true);
+
+If the third argument is true, the proof will create a [pushable](#pushable-logs) partial tree.
+
+
 
 ### Garbage Collection
 
@@ -945,7 +1038,7 @@ First, copy the `Quadrable.sol` file into your project's `contracts/` directory,
 
 To validate a Quadrable proof in a smart contract, you need two items:
 
-* `bytes encodedProof` - This is a variable-length byte-array, as output by [quadb exportProof](#quadb-exportproof) (must be `CompactNoKeys` encoding).
+* `bytes encodedProof` - This is a variable-length byte-array, as output by [quadb exportProof](#quadb-exportproof) (must be `HashedKeys` encoding).
 * `bytes32 trustedRoot` - This is a hash of a root node from a trusted source (perhaps from storage, or provided by a trusted user).
 
 Once you have these, load the proof into memory with `Quadrable.importProof()`. This creates a new tree and returns a memory address pointing to the root node:
@@ -955,6 +1048,8 @@ Once you have these, load the proof into memory with `Quadrable.importProof()`. 
 Use `Quadrable.getNodeHash()` to retrieve the hash of this node and ensure that it is the same as the `trustedRoot`:
 
     require(Quadrable.getNodeHash(rootNodeAddr) == trustedRoot, "proof invalid");
+
+#### get
 
 Now that you have authenticated the partial tree created from the proof, you can begin to use it. First the key you are interested in must be hashed:
 
@@ -966,13 +1061,33 @@ Now that you have authenticated the partial tree created from the proof, you can
 
 If you need to access a value multiple times, it is preferable to store the result in memory so you don't need to call `Quadrable.get()` multiple times (which is [expensive](#gas-usage)).
 
-Finally, you can modify the tree with `Quadrable.put()`. This will return a new `rootNodeAddr`, which you should use to overwrite the old root node address (since it is no longer valid):
+When using [integer keys](#integer-keys), do not hash the keys. Instead, use the `Quadrable.encodeInt()` function:
+
+    (bool found, bytes memory val) = Quadrable.get(rootNodeAddr, Quadrable.encodeInt(myInt));
+
+#### put
+
+You can modify the tree with `Quadrable.put()`. This will return a new `rootNodeAddr`, which you should use to overwrite the old root node address (since it is no longer valid):
 
     rootNodeAddr = Quadrable.put(rootNodeAddr, keyHash, "new val");
 
 `Quadrable.getNodeHash()` can now be used to retrieve the updated root incorporating your modifications:
 
     bytes32 newTrustedRoot = Quadrable.getNodeHash(rootNodeAddr);
+
+Similar to get, if using integer keys then use the `Quadrable.encodeInt()` function instead of hashing the keys.
+
+#### push
+
+If the partial tree created is [pushable](#pushable-logs) then you can use `Quadrable.push()` to append new items:
+
+    rootNodeAddr = Quadrable.push(rootNodeAddr, "new val");
+
+Note that when pushing no key is required. It adds it using the next pushable index as the key and updates this index.
+
+You can retrieve the number of elements in the log by calling `length` (which just returns the next pushable index or 0 if not set):
+
+    uint256 totalItems = Quadrable.length(rootNodeAddr);
 
 
 
@@ -1005,7 +1120,7 @@ Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-by
 
 ### Limitations of Solidity Implementation
 
-* Only the `CompactNoKeys` proof encoding is supported. This means that enumeration by key is not possible.
+* Only the `HashedKeys` proof encoding is supported. This means that enumeration by key is not possible.
 * Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string). The proof creation code also needs to be updated to be able to create deletion-capable proofs (see [bubbling](#bubbling)).
 * The Solidity implementation does *not* use [copy-on-write](#copy-on-write), so multiple versions of the tree can not exist simultaneously. Instead, the tree is updated in-place during modifications (nodes are reused when possible). After a `put()`, the old root node address becomes invalid. This is done to limit the amount of memory consumed.
 * Unlike the C++ implementation operations can not be [batched](#operation-batching). This is complicated to do in Solidity because dynamic memory management is difficult. Nevertheless, this may be an area for future optimisation.

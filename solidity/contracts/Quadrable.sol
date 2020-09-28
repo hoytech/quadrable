@@ -127,8 +127,9 @@ library Quadrable {
     function buildNodeLeaf(uint256 valAddr, uint256 valLen, uint256 keyHashAddr) private pure returns (uint256 nodeAddr) {
         uint256 nodeContents = buildNodeContentsLeaf(valAddr, valLen, keyHashAddr);
 
+        bytes32 keyHash = mloadKeyHash(keyHashAddr);
+
         assembly {
-            let keyHash := mload(keyHashAddr)
             let valHash := keccak256(valAddr, valLen)
 
             mstore(0, keyHash)
@@ -215,12 +216,25 @@ library Quadrable {
         }
     }
 
+    function mloadKeyHash(uint256 keyHashAddr) private pure returns (bytes32 keyHash) {
+        uint256 numTrailingZeros;
+
+        assembly {
+            numTrailingZeros := and(mload(sub(keyHashAddr, 31)), 0xFF)
+            let shiftBits := mul(8, numTrailingZeros)
+            keyHash := shl(shiftBits, shr(shiftBits, mload(add(keyHashAddr, 1))))
+        }
+    }
+
     function getNodeLeafKeyHash(uint256 nodeAddr) private pure returns (bytes32 keyHash) {
+        uint256 keyHashAddr;
+
         assembly {
             let nodeContents := mload(nodeAddr)
-            let keyHashAddr := and(shr(mul(1, 8), nodeContents), 0xFFFFFFFF)
-            keyHash := mload(keyHashAddr)
+            keyHashAddr := and(shr(mul(1, 8), nodeContents), 0xFFFFFFFF)
         }
+
+        return mloadKeyHash(keyHashAddr);
     }
 
     function getNodeLeafVal(uint256 nodeAddr) private pure returns (uint256 valAddr, uint256 valLen) {
@@ -259,7 +273,7 @@ library Quadrable {
         uint256 offset = 0; // into proof.encoded
         uint256 numStrands = 0;
 
-        require(mloadUint8(encoded, offset++) == 0, "Only CompactNoKeys encoding supported");
+        require(mloadUint8(encoded, offset++) == 0, "Only HashedKeys encoding supported");
 
         uint256 strandStateAddr;
         assembly {
@@ -276,8 +290,11 @@ library Quadrable {
 
             uint256 keyHashAddr;
             assembly { keyHashAddr := add(add(encoded, 32), offset) }
-            bytes32 keyHash = mloadBytes32(encoded, offset);
-            offset += 32;
+            {
+                uint256 numTrailingZeros = mloadUint8(encoded, offset++);
+                offset += 32 - numTrailingZeros;
+            }
+            bytes32 keyHash = mloadKeyHash(keyHashAddr);
 
             uint256 nodeContents;
             bytes32 valHash;
@@ -432,7 +449,7 @@ library Quadrable {
 
 
 
-    // get and put
+    // external interactions with tree
 
     function get(uint256 nodeAddr, bytes32 keyHash) internal pure returns (bool found, bytes memory) {
         uint256 depthMask = 1 << 255;
@@ -557,8 +574,9 @@ library Quadrable {
 
         assembly {
             keyHashAddr := mload(0x40)
-            mstore(keyHashAddr, keyHash)
-            mstore(0x40, add(keyHashAddr, 32))
+            mstore(keyHashAddr, 0) // numTrailingZeros
+            mstore(add(keyHashAddr, 1), keyHash)
+            mstore(0x40, add(keyHashAddr, 33))
 
             valLen := mload(val)
             valAddr := add(val, 32)
@@ -592,6 +610,85 @@ library Quadrable {
         }
 
         return nodeAddr;
+    }
+
+    bytes32 constant private nextPushable = bytes32(uint(0xFC) << 248);
+
+    function length(uint nodeAddr) internal pure returns (uint256) {
+        uint nextRec = 0;
+
+        (bool found, bytes memory nextRecStr) = get(nodeAddr, nextPushable);
+        if (found) nextRec = decodeVarInt(nextRecStr);
+
+        return nextRec;
+    }
+
+    function push(uint nodeAddr, bytes memory val) internal pure returns (uint256) {
+        uint nextRec = length(nodeAddr);
+
+        nodeAddr = put(nodeAddr, encodeInt(nextRec), val);
+        nodeAddr = put(nodeAddr, nextPushable, encodeVarInt(nextRec + 1));
+
+        return nodeAddr;
+    }
+
+
+    // Integer utils
+
+    function decodeVarInt(bytes memory encoded) private pure returns (uint) {
+        uint offset = 0;
+        uint output = 0;
+        uint8 b;
+
+        do {
+            b = mloadUint8(encoded, offset++);
+            output = (output << 7) | (b & 0x7F);
+        } while ((b & 0x80) != 0);
+
+        return output;
+    }
+
+    function encodeVarInt(uint n) private pure returns (bytes memory) {
+        uint numBytes = 0;
+
+        for (uint i = n; i != 0; i >>= 7) numBytes++;
+        if (numBytes == 0) numBytes = 1;
+
+        bytes memory output = new bytes(numBytes);
+
+        for (uint i = 0; i < numBytes; i++) {
+            output[numBytes - i - 1] = bytes1((uint8(n) & 0x7F) | (i == 0 ? 0 : 0x80));
+            n >>= 7;
+        }
+
+        return output;
+    }
+
+    function encodeInt(uint n) internal pure returns (bytes32) {
+        require(n < (2**64 - 1 - 2), "int range exceeded");
+
+        uint bits = 0;
+        for (uint n2 = n + 2; n2 != 1; n2 >>= 1) bits++;
+
+        uint offset = (1 << bits) - 2;
+
+        uint b = (bits - 1) << (128 - 6);
+        b |= (n - offset) << (128 - 6 - bits);
+        b <<= 128;
+
+        return bytes32(b);
+    }
+
+    function decodeInt(bytes32 input) internal pure returns (uint) {
+        uint n = uint(input);
+        uint bits = n >> (256 - 6);
+
+        n <<= 6;
+        n >>= 256 - bits - 1;
+
+        uint offset = (1 << (bits + 1)) - 2;
+
+        return n + offset;
     }
 
 

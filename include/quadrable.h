@@ -10,8 +10,10 @@
 #include <map>
 #include <set>
 #include <unordered_set>
+#include <bitset>
 #include <iterator>
 #include <algorithm>
+#include <functional>
 
 #include "lmdbxx/lmdb++.h"
 
@@ -20,9 +22,7 @@
 
 
 
-
 namespace quadrable {
-
 
 
 
@@ -46,6 +46,48 @@ std::runtime_error quaderr(const T&... value) {
 
 
 
+std::string encodeVarInt(uint64_t n) {
+    if (n == 0) return std::string(1, '\0');
+
+    std::string o;
+
+    while (n) {
+        o.push_back(static_cast<unsigned char>(n & 0x7F));
+        n >>= 7;
+    }
+
+    std::reverse(o.begin(), o.end());
+
+    for (size_t i = 0; i < o.size() - 1; i++) {
+        o[i] |= 0x80;
+    }
+
+    return o;
+}
+
+uint64_t decodeVarInt(std::function<unsigned char()> getByte) {
+    uint64_t res = 0;
+
+    while (1) {
+        uint64_t byte = getByte();
+        res = (res << 7) | (byte & 0b0111'1111);
+        if ((byte & 0b1000'0000) == 0) break;
+    }
+
+    return res;
+}
+
+uint64_t decodeVarInt(std::string_view s) {
+    size_t next = 0;
+
+    return decodeVarInt([&]{
+        if (next == s.size()) throw quaderr("premature end of varint");
+        return s[next++];
+    });
+}
+
+
+
 
 class Hash {
   public:
@@ -57,6 +99,86 @@ class Hash {
         Keccak k;
         k.add(s.data(), s.size());
         k.getHash(h.data);
+
+        return h;
+    }
+
+    static Hash fromInteger(uint64_t n) {
+        if (n > std::numeric_limits<uint64_t>::max() - 2) throw quaderr("int range exceeded");
+
+        uint64_t bits = 63 - __builtin_clzll(n + 2);
+
+        uint64_t offset = (1ULL << bits) - 2;
+        auto b = std::bitset<128>(bits - 1) << (128 - 6);
+        b |= (std::bitset<128>(n - offset) << (128 - 6 - bits));
+
+        uint64_t w1 = (b >> 64).to_ullong();
+        uint64_t w2 = ((b << 64) >> 64).to_ullong();
+
+        Hash h = nullHash();
+
+        h.data[0] = (w1 >> (64 - 8)) & 0xFF;
+        h.data[1] = (w1 >> (64 - 8*2)) & 0xFF;
+        h.data[2] = (w1 >> (64 - 8*3)) & 0xFF;
+        h.data[3] = (w1 >> (64 - 8*4)) & 0xFF;
+        h.data[4] = (w1 >> (64 - 8*5)) & 0xFF;
+        h.data[5] = (w1 >> (64 - 8*6)) & 0xFF;
+        h.data[6] = (w1 >> (64 - 8*7)) & 0xFF;
+        h.data[7] = w1 & 0xFF;
+
+        h.data[8] = (w2 >> (64 - 8)) & 0xFF;
+        h.data[9] = (w2 >> (64 - 8*2)) & 0xFF;
+        h.data[10] = (w2 >> (64 - 8*3)) & 0xFF;
+        h.data[11] = (w2 >> (64 - 8*4)) & 0xFF;
+        h.data[12] = (w2 >> (64 - 8*5)) & 0xFF;
+        h.data[13] = (w2 >> (64 - 8*6)) & 0xFF;
+        h.data[14] = (w2 >> (64 - 8*7)) & 0xFF;
+        h.data[15] = w2 & 0xFF;
+
+        return h;
+    }
+
+    uint64_t toInteger() {
+        if (std::any_of(data + 16, data + sizeof(data), [](uint8_t c){ return c != 0; })) throw quaderr("hash is not in integer format");
+
+        uint64_t w1, w2;
+
+        w1 = data[0];
+        w1 = (w1 << 8) | data[1];
+        w1 = (w1 << 8) | data[2];
+        w1 = (w1 << 8) | data[3];
+        w1 = (w1 << 8) | data[4];
+        w1 = (w1 << 8) | data[5];
+        w1 = (w1 << 8) | data[6];
+        w1 = (w1 << 8) | data[7];
+
+        w2 = data[8];
+        w2 = (w2 << 8) | data[9];
+        w2 = (w2 << 8) | data[10];
+        w2 = (w2 << 8) | data[11];
+        w2 = (w2 << 8) | data[12];
+        w2 = (w2 << 8) | data[13];
+        w2 = (w2 << 8) | data[14];
+        w2 = (w2 << 8) | data[15];
+
+        uint64_t bits = w1 >> (64 - 6);
+
+        auto b = (std::bitset<128>(w1) << 64) | std::bitset<128>(w2);
+        b <<= 6;
+        b >>= 128 - bits - 1;
+
+        uint64_t n = b.to_ullong();
+
+        uint64_t offset = (1ULL << (bits + 1)) - 2;
+
+        return n + offset;
+    }
+
+    static Hash nextPushableSentinel() {
+        Hash h;
+
+        memset(h.data, '\0', sizeof(h.data));
+        h.data[0] = '\xFC';
 
         return h;
     }
@@ -141,6 +263,8 @@ struct GetMultiResult {
 };
 
 using GetMultiQuery = std::map<std::string, GetMultiResult>;
+
+using GetMultiIntegerQuery = std::map<uint64_t, GetMultiResult>;
 
 
 
@@ -375,9 +499,37 @@ class Quadrable {
             return *this;
         }
 
+        UpdateSet &put(uint64_t keyRaw, std::string_view val) {
+            map.insert_or_assign(Hash::fromInteger(keyRaw), Update{"", std::string(val), false});
+            return *this;
+        }
+
+        UpdateSet &push(lmdb::txn &txn, std::string_view val) {
+            auto nextPushableSentinel = Hash::nextPushableSentinel();
+
+            uint64_t index = 0;
+            std::string_view indexSv;
+
+            if (map.find(nextPushableSentinel) != map.end()) {
+                index = decodeVarInt(map[nextPushableSentinel].val);
+            } else if (db->getRaw(txn, nextPushableSentinel.sv(), indexSv)) {
+                index = decodeVarInt(indexSv);
+            }
+
+            map.insert_or_assign(nextPushableSentinel, Update{"", encodeVarInt(index + 1), false});
+            map.insert_or_assign(Hash::fromInteger(index), Update{"", std::string(val), false});
+
+            return *this;
+        }
+
         UpdateSet &del(std::string_view keyRaw) {
             if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
             map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(keyRaw), "", true});
+            return *this;
+        }
+
+        UpdateSet &del(uint64_t keyRaw) {
+            map.insert_or_assign(Hash::fromInteger(keyRaw), Update{"", "", true});
             return *this;
         }
 
@@ -568,7 +720,19 @@ class Quadrable {
         change().put(key, val).apply(txn);
     }
 
+    void put(lmdb::txn &txn, uint64_t key, std::string_view val) {
+        change().put(key, val).apply(txn);
+    }
+
+    void push(lmdb::txn &txn, std::string_view val) {
+        change().push(txn, val).apply(txn);
+    }
+
     void del(lmdb::txn &txn, std::string_view key) {
+        change().del(key).apply(txn);
+    }
+
+    void del(lmdb::txn &txn, uint64_t key) {
         change().del(key).apply(txn);
     }
 
@@ -697,11 +861,37 @@ class Quadrable {
 
     using GetMultiInternalMap = std::map<Hash, GetMultiResult &>;
 
+    void getMultiRaw(lmdb::txn &txn, GetMultiQuery &queryMap) {
+        GetMultiInternalMap map;
+
+        for (auto &[key, res] : queryMap) {
+            map.emplace(Hash::existingHash(key), res);
+        }
+
+        uint64_t depth = 0;
+        auto nodeId = getHeadNodeId(txn);
+
+        getMultiAux(txn, depth, nodeId, map.begin(), map.end());
+    }
+
     void getMulti(lmdb::txn &txn, GetMultiQuery &queryMap) {
         GetMultiInternalMap map;
 
         for (auto &[key, res] : queryMap) {
             map.emplace(Hash::hash(key), res);
+        }
+
+        uint64_t depth = 0;
+        auto nodeId = getHeadNodeId(txn);
+
+        getMultiAux(txn, depth, nodeId, map.begin(), map.end());
+    }
+
+    void getMultiInteger(lmdb::txn &txn, GetMultiIntegerQuery &queryMap) {
+        GetMultiInternalMap map;
+
+        for (auto &[key, res] : queryMap) {
+            map.emplace(Hash::fromInteger(key), res);
         }
 
         uint64_t depth = 0;
@@ -746,12 +936,43 @@ class Quadrable {
         }
     }
 
+
     bool get(lmdb::txn &txn, const std::string_view key, std::string_view &val) {
         GetMultiQuery query;
 
         auto rec = query.emplace(key, GetMultiResult{});
 
         getMulti(txn, query);
+
+        if (rec.first->second.exists) {
+            val = rec.first->second.val;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool getRaw(lmdb::txn &txn, const std::string_view key, std::string_view &val) {
+        GetMultiQuery query;
+
+        auto rec = query.emplace(key, GetMultiResult{});
+
+        getMultiRaw(txn, query);
+
+        if (rec.first->second.exists) {
+            val = rec.first->second.val;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool get(lmdb::txn &txn, uint64_t key, std::string_view &val) {
+        GetMultiIntegerQuery query;
+
+        auto rec = query.emplace(key, GetMultiResult{});
+
+        getMultiInteger(txn, query);
 
         if (rec.first->second.exists) {
             val = rec.first->second.val;
@@ -769,6 +990,18 @@ class Quadrable {
         }
 
         getMulti(txn, query);
+
+        return query;
+    }
+
+    GetMultiIntegerQuery get(lmdb::txn &txn, std::set<uint64_t> keys) {
+        GetMultiIntegerQuery query;
+
+        for (auto &key : keys) {
+            query.emplace(key, GetMultiResult{});
+        }
+
+        getMultiInteger(txn, query);
 
         return query;
     }
@@ -794,6 +1027,33 @@ class Quadrable {
             keyHashes.emplace(Hash::hash(key), key);
         }
 
+        return exportProofRaw(txn, keyHashes);
+    }
+
+    Proof exportProofInteger(lmdb::txn &txn, const std::set<uint64_t> &keys = {}, bool pushable = false) {
+        ProofHashes keyHashes;
+
+        for (auto &key : keys) {
+            keyHashes.emplace(Hash::fromInteger(key), "");
+        }
+
+        if (pushable) {
+            auto nextPushableSentinel = Hash::nextPushableSentinel();
+            uint64_t index = 0;
+            std::string_view indexSv;
+
+            if (getRaw(txn, nextPushableSentinel.sv(), indexSv)) {
+                index = decodeVarInt(indexSv);
+            }
+
+            keyHashes.emplace(Hash::nextPushableSentinel(), "");
+            keyHashes.emplace(Hash::fromInteger(index), "");
+        }
+
+        return exportProofRaw(txn, keyHashes);
+    }
+
+    Proof exportProofRaw(lmdb::txn &txn, ProofHashes &keyHashes) {
         auto headNodeId = getHeadNodeId(txn);
 
         ProofGenItems items;
@@ -1006,6 +1266,8 @@ class Quadrable {
                 throw quaderr("unrecognized ProofItem type: ", int(strand.strandType));
             }
         }
+
+        if (accums.size() == 0) throw quaderr("empty proof");
 
         accums.back().next = -1;
 

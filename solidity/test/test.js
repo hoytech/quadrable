@@ -174,6 +174,27 @@ testSpecs.push({
 });
 
 
+testSpecs.push({
+    desc: 'basic push test',
+    intData: ['a', 'b', 'c'],
+    intInc: [1],
+    push: ['d'],
+});
+
+
+testSpecs.push({
+    desc: 'push from empty',
+    intData: [],
+    intInc: [],
+    push: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+});
+
+testSpecs.push({
+    desc: 'bigger push test',
+    intData: [...Array(1000).keys()].map(i => `item${i}`),
+    intInc: [500, 501, 502],
+    push: ['another item', 'another'],
+});
 
 
 if (process.env.GAS_USAGE) {
@@ -301,20 +322,33 @@ describe("Quadrable Test Suite", function() {
 
             {
                 if (!spec.manualDbInit) {
-                    let input = '';
+                    if (spec.intData) {
+                        let input = '';
 
-                    for (let key of Object.keys(spec.data)) {
-                        input += `${key},${spec.data[key]}\n`;
+                        for (let item of spec.intData) {
+                            input += `${item}\n`;
+                        }
+
+                        quadb(`push --stdin`, { input, });
+                    } else {
+                        let input = '';
+
+                        for (let key of Object.keys(spec.data)) {
+                            input += `${key},${spec.data[key]}\n`;
+                        }
+
+                        quadb(`import`, { input, });
                     }
-
-                    quadb(`import`, { input, });
                 }
 
                 rootHex = quadb(`root`).toString().trim();
 
-                let proofKeys = (spec.inc || []).concat(spec.non || []).join(' ');
+                let proofKeys;
 
-                proofHex = quadb(`exportProof --hex -- ${proofKeys}`).toString().trim();
+                if (spec.intData) proofKeys = spec.intInc.join(' ');
+                else proofKeys = (spec.inc || []).concat(spec.non || []).join(' ');
+
+                proofHex = quadb(`exportProof --hex ${spec.intData ? '--int --pushable' : ''} -- ${proofKeys}`).toString().trim();
             }
 
             let updateKeys = [];
@@ -325,7 +359,11 @@ describe("Quadrable Test Suite", function() {
                 updateVals.push(Buffer.from(p[1]));
             }
 
-            let res = await testHarness.testProof(proofHex, (spec.inc || []).map(i => Buffer.from(i)), updateKeys, updateVals);
+            for (let p of (spec.push || [])) {
+                updateVals.push(Buffer.from(p));
+            }
+
+            let res = await testHarness.testProof(proofHex, (spec.inc || []).map(i => Buffer.from(i)), spec.intInc || [], updateKeys, updateVals);
             expect(res[0]).to.equal(rootHex);
             logGas(res);
             for (let i = 0; i < (spec.inc || []).length; i++) {
@@ -334,8 +372,14 @@ describe("Quadrable Test Suite", function() {
                 expect(Buffer.from(valHex, 'hex').toString()).to.equal(spec.data[spec.inc[i]]);
             }
 
+            for (let i = 0; i < (spec.intInc || []).length; i++) {
+                let valHex = res[1][i];
+                valHex = valHex.substr(2); // remove 0x prefix
+                expect(Buffer.from(valHex, 'hex').toString()).to.equal(spec.intData[spec.intInc[i]]);
+            }
+
             if (spec.non && spec.non.length) {
-                let res = await testHarness.testProof(proofHex, spec.non.map(i => Buffer.from(i)), [], []);
+                let res = await testHarness.testProof(proofHex, spec.non.map(i => Buffer.from(i)), spec.intNon || [], [], []);
                 logGas(res);
                 for (let i = 0; i < spec.non.length; i++) {
                     expect(res[1][i]).to.equal('0x');
@@ -345,7 +389,7 @@ describe("Quadrable Test Suite", function() {
             for (let e of (spec.err || [])) {
                 let threw;
                 try {
-                    await testHarness.testProof(proofHex, [Buffer.from(e)], [], []);
+                    await testHarness.testProof(proofHex, [Buffer.from(e)], [], [], []);
                 } catch (e) {
                     threw = '' + e;
                 }
@@ -353,7 +397,15 @@ describe("Quadrable Test Suite", function() {
                 expect(threw).to.contain("incomplete tree");
             }
 
-            if (spec.put && spec.put.length) {
+            if (spec.push && spec.push.length) {
+                let input = '';
+
+                for (let p of (spec.push || [])) {
+                    input += `${p}\n`;
+                }
+
+                quadb(`push --stdin`, { input, });
+            } else if (spec.put && spec.put.length) {
                 let input = '';
 
                 for (let p of (spec.put || [])) {
@@ -361,9 +413,10 @@ describe("Quadrable Test Suite", function() {
                 }
 
                 quadb(`import`, { input, });
-                let newRootHex = quadb(`root`).toString().trim();
-                expect(res[2]).to.equal(newRootHex);
             }
+
+            let newRootHex = quadb(`root`).toString().trim();
+            expect(res[2]).to.equal(newRootHex);
         });
     }
 });

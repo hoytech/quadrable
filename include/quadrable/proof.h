@@ -8,36 +8,13 @@ namespace quadrable { namespace proofTransport {
 
 
 
-std::string varInt(uint64_t n) {
-    if (n == 0) return std::string(1, '\0');
-
-    std::string o;
-
-    while (n) {
-        o.push_back(static_cast<unsigned char>(n & 0x7F));
-        n >>= 7;
-    }
-
-    std::reverse(o.begin(), o.end());
-
-    for (size_t i = 0; i < o.size() - 1; i++) {
-        o[i] |= 0x80;
-    }
-
-    return o;
-}
-
-
-
-
-
 enum class EncodingType {
-    CompactNoKeys = 0,
-    CompactWithKeys = 1,
+    HashedKeys = 0,
+    FullKeys = 1,
 };
 
 
-static inline std::string encodeProof(const Proof &p, EncodingType encodingType = EncodingType::CompactNoKeys) {
+static inline std::string encodeProof(const Proof &p, EncodingType encodingType = EncodingType::HashedKeys) {
     std::string o;
 
     // Encoding type
@@ -46,26 +23,37 @@ static inline std::string encodeProof(const Proof &p, EncodingType encodingType 
 
     // Strands
 
+    auto addKeyHash = [&](std::string_view keyHash){
+        uint64_t numTrailingZeros = 0;
+        for (int i = 31; i >= 0; i--) {
+            if (keyHash[static_cast<size_t>(i)] != '\0') break;
+            numTrailingZeros++;
+        }
+
+        o += static_cast<unsigned char>(numTrailingZeros);
+        o += keyHash.substr(0, 32 - numTrailingZeros);
+    };
+
     for (auto &strand : p.strands) {
         o += static_cast<unsigned char>(strand.strandType);
         o += static_cast<unsigned char>(strand.depth);
 
         if (strand.strandType == ProofStrand::Type::Leaf) {
-            if (encodingType == EncodingType::CompactNoKeys) {
-                o += strand.keyHash;
-            } else if (encodingType == EncodingType::CompactWithKeys) {
-                if (strand.key.size() == 0) throw quaderr("CompactWithKeys specified in proof encoding, but key not available");
-                o += varInt(strand.key.size());
+            if (encodingType == EncodingType::HashedKeys) {
+                addKeyHash(strand.keyHash);
+            } else if (encodingType == EncodingType::FullKeys) {
+                if (strand.key.size() == 0) throw quaderr("FullKeys specified in proof encoding, but key not available");
+                o += encodeVarInt(strand.key.size());
                 o += strand.key;
             }
 
-            o += varInt(strand.val.size());
+            o += encodeVarInt(strand.val.size());
             o += strand.val;
         } else if (strand.strandType == ProofStrand::Type::WitnessLeaf) {
-            o += strand.keyHash;
+            addKeyHash(strand.keyHash);
             o += strand.val; // holds valHash
         } else if (strand.strandType == ProofStrand::Type::WitnessEmpty) {
-            o += strand.keyHash;
+            addKeyHash(strand.keyHash);
         } else {
             throw quaderr("unrecognized ProofStrand::Type when encoding proof: ", (int)strand.strandType);
         }
@@ -163,23 +151,17 @@ static inline Proof decodeProof(std::string_view encoded) {
         return res;
     };
 
-    auto getVarInt = [&](){
-        uint64_t res = 0;
-
-        while (1) {
-            uint64_t byte = getByte();
-            res = (res << 7) | (byte & 0b0111'1111);
-            if ((byte & 0b1000'0000) == 0) break;
-        }
-
-        return res;
+    auto getKeyHash = [&](){
+        auto numTrailingZeros = getByte();
+        return std::string(getBytes(32 - numTrailingZeros)) + std::string(numTrailingZeros, '\0');
     };
+
 
     // Encoding type
 
     auto encodingType = static_cast<EncodingType>(getByte());
 
-    if (encodingType != EncodingType::CompactNoKeys && encodingType != EncodingType::CompactWithKeys) {
+    if (encodingType != EncodingType::HashedKeys && encodingType != EncodingType::FullKeys) {
         throw quaderr("unexpected proof encoding type: ", (int)encodingType);
     }
 
@@ -195,21 +177,21 @@ static inline Proof decodeProof(std::string_view encoded) {
         strand.depth = getByte();
 
         if (strandType == ProofStrand::Type::Leaf) {
-            if (encodingType == EncodingType::CompactNoKeys) {
-                strand.keyHash = std::string(getBytes(32));
-            } else if (encodingType == EncodingType::CompactWithKeys) {
-                auto keySize = getVarInt();
+            if (encodingType == EncodingType::HashedKeys) {
+                strand.keyHash = getKeyHash();
+            } else if (encodingType == EncodingType::FullKeys) {
+                auto keySize = decodeVarInt(getByte);
                 strand.key = std::string(getBytes(keySize));
                 strand.keyHash = Hash::hash(strand.key).str();
             }
 
-            auto valSize = getVarInt();
+            auto valSize = decodeVarInt(getByte);
             strand.val = std::string(getBytes(valSize));
         } else if (strandType == ProofStrand::Type::WitnessLeaf) {
-            strand.keyHash = std::string(getBytes(32));
+            strand.keyHash = getKeyHash();
             strand.val = std::string(getBytes(32)); // holds valHash
         } else if (strandType == ProofStrand::Type::WitnessEmpty) {
-            strand.keyHash = std::string(getBytes(32));
+            strand.keyHash = getKeyHash();
         } else {
             throw quaderr("unrecognized ProofStrand::Type when decoding proof: ", (int)strandType);
         }

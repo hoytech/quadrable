@@ -23,9 +23,10 @@ static const char USAGE[] =
 R"(
     Usage:
       quadb [options] init
-      quadb [options] put [--] <key> <val>
-      quadb [options] del [--] <key>
-      quadb [options] get [--] <key>
+      quadb [options] put [--int] [--] <key> <val>
+      quadb [options] del [--int] [--] <key>
+      quadb [options] get [--int] [--] <key>
+      quadb [options] push [--stdin] [--] [<vals>...]
       quadb [options] export [--sep=<sep>]
       quadb [options] import [--sep=<sep>]
       quadb [options] root
@@ -38,7 +39,7 @@ R"(
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [--from=<from>]
       quadb [options] gc
-      quadb [options] exportProof [--format=(noKeys|withKeys)] [--hex] [--dump] [--] <keys>...
+      quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--int] [--pushable] [--] [<keys>...]
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
       quadb [options] mergeProof [--hex]
       quadb [options] dump-tree
@@ -47,6 +48,7 @@ R"(
     Options:
       --db=<dir>     Database directory (default $ENV{QUADB_DIR} || "./quadb-dir/")
       --noTrackKeys  Don't store keys in DB (default $ENV{QUADB_NOTRACKKEYS} || false)
+      --int          Keys are in integer format
       -h --help      Show this screen.
       --version      Show version.
 )";
@@ -162,14 +164,56 @@ void run(int argc, char **argv) {
         std::string k = args["<key>"].asString();
         std::string v = args["<val>"].asString();
 
-        db.change().put(k, v).apply(txn);
+        auto changes = db.change();
+
+        if (args["--int"].asBool()) {
+            changes.put(std::stoull(k), v);
+        } else {
+            changes.put(k, v);
+        }
+
+        changes.apply(txn);
     } else if (args["del"].asBool()) {
         std::string k = args["<key>"].asString();
-        db.change().del(k).apply(txn);
+
+        auto changes = db.change();
+
+        if (args["--int"].asBool()) {
+            changes.del(std::stoull(k));
+        } else {
+            changes.del(k);
+        }
+
+        changes.apply(txn);
+    } else if (args["push"].asBool()) {
+        auto changes = db.change();
+
+        if (args["--stdin"].asBool()) {
+            std::string line;
+
+            while (std::getline(std::cin, line)) {
+                changes.push(txn, line);
+            }
+        } else {
+            for (auto &val : args["<vals>"].asStringList()) {
+                changes.push(txn, val);
+            }
+        }
+
+        changes.apply(txn);
     } else if (args["get"].asBool()) {
         std::string k = args["<key>"].asString();
         std::string_view v;
-        if (!db.get(txn, k, v)) throw quaderr("key not found in db");
+
+        bool found;
+
+        if (args["--int"].asBool()) {
+            found = db.get(txn, std::stoull(k), v);
+        } else {
+            found = db.get(txn, k, v);
+        }
+
+        if (!found) throw quaderr("key not found in db");
         std::cout << v << std::endl;
     } else if (args["head"].asBool()) {
         bool isDetachedHead = db.isDetachedHead();
@@ -347,15 +391,27 @@ void run(int argc, char **argv) {
 
         std::cout << "Collected " << stats.collected << "/" << stats.total << " nodes" << std::endl;
     } else if (args["exportProof"].asBool()) {
-        std::set<std::string> keys;
+        quadrable::Proof proof;
 
-        for (auto &key : args["<keys>"].asStringList()) {
-            keys.insert(key);
+        if (args["--pushable"].asBool() || args["--int"].asBool()) {
+            std::set<uint64_t> keys;
+
+            for (auto &key : args["<keys>"].asStringList()) {
+                keys.insert(std::stoull(key));
+            }
+
+            proof = db.exportProofInteger(txn, keys, args["--pushable"].asBool());
+        } else {
+            std::set<std::string> keys;
+
+            for (auto &key : args["<keys>"].asStringList()) {
+                keys.insert(key);
+            }
+
+            proof = db.exportProof(txn, keys);
         }
 
-        auto proof = db.exportProof(txn, keys);
-
-        std::string format = "noKeys";
+        std::string format = "HashedKeys";
         if (args["--format"]) format = args["--format"].asString();
 
         if (args["--dump"].asBool()) {
@@ -363,10 +419,10 @@ void run(int argc, char **argv) {
         } else {
             std::string encoded;
 
-            if (format == "noKeys") {
-                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::CompactNoKeys);
-            } else if (format == "withKeys") {
-                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::CompactWithKeys);
+            if (format == "HashedKeys") {
+                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::HashedKeys);
+            } else if (format == "FullKeys") {
+                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::FullKeys);
             } else {
                 throw quaderr("unknown proof format");
             }
