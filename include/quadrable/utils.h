@@ -128,7 +128,7 @@ static inline void dumpProof(const Proof &p) {
                          cmd.op == ProofCmd::Op::Merge ? "Merge" :
                          "?";
 
-        std::cout << "  CMD " << i << ": " << op << " -> " << cmd.nodeOffset << "\n";
+        std::cout << "  CMD " << i << ": " << op << " @ " << cmd.nodeOffset << "\n";
 
         if (cmd.op == ProofCmd::Op::HashProvided) {
             std::cout << "    Sibling hash: " << to_hex(cmd.hash, true) << "\n";

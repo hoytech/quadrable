@@ -69,9 +69,8 @@ class Hash {
         uint64_t bits = __builtin_clzll(n + 2);
 
         uint64_t offset = (1ULL << (63 - bits)) - 2;
-
-        auto b = std::bitset<128>(std::numeric_limits<uint64_t>::max()) << (129 - (63 - bits));
-        b |= (std::bitset<128>(n - offset) << 128-((63-bits-1)*2)-2);
+        auto b = std::bitset<128>(62 - bits) << (128 - 6);
+        b |= (std::bitset<128>(n - offset) << 128-6-(63-bits));
 
         uint64_t w1 = (b >> 64).to_ullong();
         uint64_t w2 = ((b << 64) >> 64).to_ullong();
@@ -122,12 +121,10 @@ class Hash {
         w2 = (w2 << 8) | data[14];
         w2 = (w2 << 8) | data[15];
 
-        uint64_t invw1 = ~w1;
-        if (invw1 == 0) throw quaderr("hash is not in integer format");
-        uint64_t bits = __builtin_clzll(invw1);
+        uint64_t bits = w1 >> (64 - 6);
 
         auto b = (std::bitset<128>(w1) << 64) | std::bitset<128>(w2);
-        b <<= bits + 1;
+        b <<= 6;
         b >>= 128 - bits - 1;
 
         uint64_t n = b.to_ullong();
@@ -135,6 +132,15 @@ class Hash {
         uint64_t offset = (1ULL << (bits + 1)) - 2;
 
         return n + offset;
+    }
+
+    static Hash pushLengthHash() {
+        Hash h;
+
+        memset(h.data, '\0', sizeof(h.data));
+        h.data[0] = '\xFC';
+
+        return h;
     }
 
     static Hash existingHash(std::string_view s) {
@@ -458,6 +464,26 @@ class Quadrable {
             return *this;
         }
 
+        // FIXME: Don't assume little endianness
+
+        UpdateSet &push(lmdb::txn &txn, std::string_view val) {
+            auto pushLengthHash = Hash::pushLengthHash();
+
+            uint64_t index = 0;
+            std::string_view indexSv;
+
+            if (map.find(pushLengthHash) != map.end()) {
+                index = lmdb::from_sv<uint64_t>(map[pushLengthHash].val);
+            } else if (db->getRaw(txn, pushLengthHash.sv(), indexSv)) {
+                index = lmdb::from_sv<uint64_t>(indexSv);
+            }
+
+            map.insert_or_assign(pushLengthHash, Update{"", std::string(lmdb::to_sv<uint64_t>(index + 1)), false});
+            map.insert_or_assign(Hash::fromInteger(index), Update{"", std::string(val), false});
+
+            return *this;
+        }
+
         UpdateSet &del(std::string_view keyRaw) {
             if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
             map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(keyRaw), "", true});
@@ -660,6 +686,10 @@ class Quadrable {
         change().put(key, val).apply(txn);
     }
 
+    void push(lmdb::txn &txn, std::string_view val) {
+        change().push(txn, val).apply(txn);
+    }
+
     void del(lmdb::txn &txn, std::string_view key) {
         change().del(key).apply(txn);
     }
@@ -793,6 +823,19 @@ class Quadrable {
 
     using GetMultiInternalMap = std::map<Hash, GetMultiResult &>;
 
+    void getMultiRaw(lmdb::txn &txn, GetMultiQuery &queryMap) {
+        GetMultiInternalMap map;
+
+        for (auto &[key, res] : queryMap) {
+            map.emplace(Hash::existingHash(key), res);
+        }
+
+        uint64_t depth = 0;
+        auto nodeId = getHeadNodeId(txn);
+
+        getMultiAux(txn, depth, nodeId, map.begin(), map.end());
+    }
+
     void getMulti(lmdb::txn &txn, GetMultiQuery &queryMap) {
         GetMultiInternalMap map;
 
@@ -871,6 +914,21 @@ class Quadrable {
         return false;
     }
 
+    bool getRaw(lmdb::txn &txn, const std::string_view key, std::string_view &val) {
+        GetMultiQuery query;
+
+        auto rec = query.emplace(key, GetMultiResult{});
+
+        getMultiRaw(txn, query);
+
+        if (rec.first->second.exists) {
+            val = rec.first->second.val;
+            return true;
+        }
+
+        return false;
+    }
+
     bool get(lmdb::txn &txn, uint64_t key, std::string_view &val) {
         GetMultiIntegerQuery query;
 
@@ -885,7 +943,6 @@ class Quadrable {
 
         return false;
     }
-
 
     GetMultiQuery get(lmdb::txn &txn, std::set<std::string> keys) {
         GetMultiQuery query;
@@ -932,6 +989,22 @@ class Quadrable {
             keyHashes.emplace(Hash::hash(key), key);
         }
 
+        return exportProofRaw(txn, keyHashes);
+    }
+
+    Proof exportProofInteger(lmdb::txn &txn, const std::set<uint64_t> &keys) {
+        ProofHashes keyHashes;
+
+        for (auto &key : keys) {
+            keyHashes.emplace(Hash::fromInteger(key), "");
+        }
+
+        keyHashes.emplace(Hash::pushLengthHash(), "");
+
+        return exportProofRaw(txn, keyHashes);
+    }
+
+    Proof exportProofRaw(lmdb::txn &txn, ProofHashes &keyHashes) {
         auto headNodeId = getHeadNodeId(txn);
 
         ProofGenItems items;
