@@ -737,8 +737,7 @@ void doTests() {
         auto origRoot = db.root(txn);
 
         auto proof = proofRoundtrip(db.exportProofInteger(txn, {
-            n - 1,
-            n,
+            n - 20,
         }));
 
 
@@ -748,10 +747,51 @@ void doTests() {
 
         std::string_view val;
 
-        verify(db.get(txn, n - 1, val));
-        verify(val == "asdf " + std::to_string(n - 1));
-        verifyThrow(db.get(txn, n - 2, val), "incomplete tree"); // exists as a witness only
+        verify(db.get(txn, n - 20, val));
+        verify(val == "asdf " + std::to_string(n - 20));
+        verifyThrow(db.get(txn, n - 9, val), "incomplete tree");
+        verifyThrow(db.get(txn, n - 1, val), "incomplete tree");
+        verifyThrow(db.get(txn, n, val), "incomplete tree");
+        verifyThrow(db.get(txn, n + 1, val), "incomplete tree");
+    });
 
+    test("pushable and individual", [&]{
+        auto change = db.change();
+
+        uint64_t n = 1000;
+
+        for (uint64_t i = 0; i < n; i++) {
+            change.push(txn, "asdf " + std::to_string(i));
+        }
+
+        change.apply(txn);
+
+        auto origRoot = db.root(txn);
+
+        auto proof = proofRoundtrip(db.exportProofPushable(txn, {
+            600,
+            601,
+            602,
+        }));
+
+
+        db.checkout();
+
+        db.importProof(txn, proof, origRoot);
+
+        std::string_view val;
+
+        verify(db.get(txn, 600, val));
+        verify(val == "asdf 600");
+        verify(db.get(txn, 601, val));
+        verify(val == "asdf 601");
+        verify(db.get(txn, 602, val));
+        verify(val == "asdf 602");
+
+        verifyThrow(db.get(txn, 603, val), "incomplete tree");
+        verifyThrow(db.get(txn, n-1, val), "incomplete tree");
+
+        // all >=n are available (not-present)
         for (uint i = n; i < n*100; i++) verify(!db.get(txn, i, val));
     });
 
@@ -1104,9 +1144,7 @@ void doTests() {
         equivHeads("push on a bunch of extras", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.exportProofInteger(txn, {
-                1000,
-            }));
+            proof = proofRoundtrip(db.exportProofPushable(txn));
             origRoot = db.root(txn);
 
             auto changes = db.change();

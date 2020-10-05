@@ -999,7 +999,26 @@ class Quadrable {
             keyHashes.emplace(Hash::fromInteger(key), "");
         }
 
+        return exportProofRaw(txn, keyHashes);
+    }
+
+    Proof exportProofPushable(lmdb::txn &txn, const std::set<uint64_t> &keys = {}) {
+        ProofHashes keyHashes;
+
+        for (auto &key : keys) {
+            keyHashes.emplace(Hash::fromInteger(key), "");
+        }
+
+        auto pushLengthHash = Hash::pushLengthHash();
+        uint64_t index = 0;
+        std::string_view indexSv;
+
+        if (getRaw(txn, pushLengthHash.sv(), indexSv)) {
+            index = lmdb::from_sv<uint64_t>(indexSv);
+        }
+
         keyHashes.emplace(Hash::pushLengthHash(), "");
+        keyHashes.emplace(Hash::fromInteger(index), "");
 
         return exportProofRaw(txn, keyHashes);
     }
