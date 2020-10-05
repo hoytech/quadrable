@@ -26,6 +26,7 @@ R"(
       quadb [options] put [--] <key> <val>
       quadb [options] del [--] <key>
       quadb [options] get [--] <key>
+      quadb [options] push [--stdin] [--] [<vals>...]
       quadb [options] export [--sep=<sep>]
       quadb [options] import [--sep=<sep>]
       quadb [options] root
@@ -47,6 +48,7 @@ R"(
     Options:
       --db=<dir>     Database directory (default $ENV{QUADB_DIR} || "./quadb-dir/")
       --noTrackKeys  Don't store keys in DB (default $ENV{QUADB_NOTRACKKEYS} || false)
+      --int          Keys are in integer format
       -h --help      Show this screen.
       --version      Show version.
 )";
@@ -162,14 +164,56 @@ void run(int argc, char **argv) {
         std::string k = args["<key>"].asString();
         std::string v = args["<val>"].asString();
 
-        db.change().put(k, v).apply(txn);
+        auto changes = db.change();
+
+        if (args["--int"].asBool()) {
+            changes.put(std::stoull(k), v);
+        } else {
+            changes.put(k, v);
+        }
+
+        changes.apply(txn);
     } else if (args["del"].asBool()) {
         std::string k = args["<key>"].asString();
-        db.change().del(k).apply(txn);
+
+        auto changes = db.change();
+
+        if (args["--int"].asBool()) {
+            changes.del(std::stoull(k));
+        } else {
+            changes.del(k);
+        }
+
+        changes.apply(txn);
+    } else if (args["push"].asBool()) {
+        auto changes = db.change();
+
+        if (args["--stdin"].asBool()) {
+            std::string line;
+
+            while (std::getline(std::cin, line)) {
+                changes.push(txn, line);
+            }
+        } else {
+            for (auto &val : args["<vals>"].asStringList()) {
+                changes.push(txn, val);
+            }
+        }
+
+        changes.apply(txn);
     } else if (args["get"].asBool()) {
         std::string k = args["<key>"].asString();
         std::string_view v;
-        if (!db.get(txn, k, v)) throw quaderr("key not found in db");
+
+        bool found;
+
+        if (args["--int"].asBool()) {
+            found = db.get(txn, std::stoull(k), v);
+        } else {
+            found = db.get(txn, k, v);
+        }
+
+        if (!found) throw quaderr("key not found in db");
         std::cout << v << std::endl;
     } else if (args["head"].asBool()) {
         bool isDetachedHead = db.isDetachedHead();
