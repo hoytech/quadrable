@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <functional>
 #include <set>
+#include <bitset>
 
 #include "quadrable.h"
 #include "quadrable/utils.h"
@@ -95,6 +96,7 @@ void doTests() {
     (void)stats;
 
 
+
     test("basic put/get", [&]{
         db.change()
           .put("hello", "world")
@@ -134,6 +136,27 @@ void doTests() {
             db.change().put("a", "2").apply(txn);
         });
     });
+
+
+    test("basic put/get integers", [&]{
+        db.change()
+          .put(0, "zero")
+          .put(1, "one")
+          .apply(txn);
+
+        std::string_view val;
+        verify(db.get(txn, 0, val));
+        verify(val == "zero");
+
+        verify(db.get(txn, 1, val));
+        verify(val == "one");
+
+        verify(!db.get(txn, 2, val));
+
+        auto stats = db.stats(txn);
+        verify(stats.numLeafNodes == 2);
+    });
+
 
 
 

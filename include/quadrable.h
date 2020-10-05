@@ -10,8 +10,10 @@
 #include <map>
 #include <set>
 #include <unordered_set>
+#include <bitset>
 #include <iterator>
 #include <algorithm>
+#include <functional>
 
 #include "lmdbxx/lmdb++.h"
 
@@ -62,48 +64,77 @@ class Hash {
     }
 
     static Hash fromInteger(uint64_t n) {
-        if ((n & (1ULL << 63))) throw quaderr("int range exceeded");
+        if (n > std::numeric_limits<uint64_t>::max() - 2) throw quaderr("int range exceeded");
 
-        uint64_t bits = n ? __builtin_clzll(n) : 0;
+        uint64_t bits = __builtin_clzll(n + 2);
 
-        uint64_t encoded = n - (1ULL << (63 - bits));
-        encoded <<= (bits + 1);
-        encoded |= 1ULL << bits;
+        uint64_t offset = (1ULL << (63 - bits)) - 2;
+
+        auto b = std::bitset<128>(std::numeric_limits<uint64_t>::max()) << (129 - (63 - bits));
+        b |= (std::bitset<128>(n - offset) << 128-((63-bits-1)*2)-2);
+
+        uint64_t w1 = (b >> 64).to_ullong();
+        uint64_t w2 = ((b << 64) >> 64).to_ullong();
 
         Hash h = nullHash();
 
-        h.data[0] = (encoded >> (64 - 8)) & 0xFF;
-        h.data[1] = (encoded >> (64 - 8*2)) & 0xFF;
-        h.data[2] = (encoded >> (64 - 8*3)) & 0xFF;
-        h.data[3] = (encoded >> (64 - 8*4)) & 0xFF;
-        h.data[4] = (encoded >> (64 - 8*5)) & 0xFF;
-        h.data[5] = (encoded >> (64 - 8*6)) & 0xFF;
-        h.data[6] = (encoded >> (64 - 8*7)) & 0xFF;
-        h.data[7] = encoded & 0xFF;
+        h.data[0] = (w1 >> (64 - 8)) & 0xFF;
+        h.data[1] = (w1 >> (64 - 8*2)) & 0xFF;
+        h.data[2] = (w1 >> (64 - 8*3)) & 0xFF;
+        h.data[3] = (w1 >> (64 - 8*4)) & 0xFF;
+        h.data[4] = (w1 >> (64 - 8*5)) & 0xFF;
+        h.data[5] = (w1 >> (64 - 8*6)) & 0xFF;
+        h.data[6] = (w1 >> (64 - 8*7)) & 0xFF;
+        h.data[7] = w1 & 0xFF;
+
+        h.data[8] = (w2 >> (64 - 8)) & 0xFF;
+        h.data[9] = (w2 >> (64 - 8*2)) & 0xFF;
+        h.data[10] = (w2 >> (64 - 8*3)) & 0xFF;
+        h.data[11] = (w2 >> (64 - 8*4)) & 0xFF;
+        h.data[12] = (w2 >> (64 - 8*5)) & 0xFF;
+        h.data[13] = (w2 >> (64 - 8*6)) & 0xFF;
+        h.data[14] = (w2 >> (64 - 8*7)) & 0xFF;
+        h.data[15] = w2 & 0xFF;
 
         return h;
     }
 
     uint64_t toInteger() {
-        if (std::any_of(data + 8, data + sizeof(data), [](uint8_t c){ return c != 0; })) throw quaderr("hash is not in integer format");
+        if (std::any_of(data + 16, data + sizeof(data), [](uint8_t c){ return c != 0; })) throw quaderr("hash is not in integer format");
 
-        uint64_t encoded;
+        uint64_t w1, w2;
 
-        encoded = data[0];
-        encoded = (encoded << 8) | data[1];
-        encoded = (encoded << 8) | data[2];
-        encoded = (encoded << 8) | data[3];
-        encoded = (encoded << 8) | data[4];
-        encoded = (encoded << 8) | data[5];
-        encoded = (encoded << 8) | data[6];
-        encoded = (encoded << 8) | data[7];
+        w1 = data[0];
+        w1 = (w1 << 8) | data[1];
+        w1 = (w1 << 8) | data[2];
+        w1 = (w1 << 8) | data[3];
+        w1 = (w1 << 8) | data[4];
+        w1 = (w1 << 8) | data[5];
+        w1 = (w1 << 8) | data[6];
+        w1 = (w1 << 8) | data[7];
 
-        uint64_t bits = encoded ? __builtin_ctzll(encoded) : 0;
+        w2 = data[8];
+        w2 = (w2 << 8) | data[9];
+        w2 = (w2 << 8) | data[10];
+        w2 = (w2 << 8) | data[11];
+        w2 = (w2 << 8) | data[12];
+        w2 = (w2 << 8) | data[13];
+        w2 = (w2 << 8) | data[14];
+        w2 = (w2 << 8) | data[15];
 
-        uint n = encoded >> (bits + 1);
-        n += (1ULL << (63 - bits));
+        uint64_t invw1 = ~w1;
+        if (invw1 == 0) throw quaderr("hash is not in integer format");
+        uint64_t bits = __builtin_clzll(invw1);
 
-        return n;
+        auto b = (std::bitset<128>(w1) << 64) | std::bitset<128>(w2);
+        b <<= bits + 1;
+        b >>= 128 - bits - 1;
+
+        uint64_t n = b.to_ullong();
+
+        uint64_t offset = (1ULL << (bits + 1)) - 2;
+
+        return n + offset;
     }
 
     static Hash existingHash(std::string_view s) {
@@ -186,6 +217,8 @@ struct GetMultiResult {
 };
 
 using GetMultiQuery = std::map<std::string, GetMultiResult>;
+
+using GetMultiIntegerQuery = std::map<uint64_t, GetMultiResult>;
 
 
 
@@ -420,9 +453,19 @@ class Quadrable {
             return *this;
         }
 
+        UpdateSet &put(uint64_t keyRaw, std::string_view val) {
+            map.insert_or_assign(Hash::fromInteger(keyRaw), Update{"", std::string(val), false});
+            return *this;
+        }
+
         UpdateSet &del(std::string_view keyRaw) {
             if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
             map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(keyRaw), "", true});
+            return *this;
+        }
+
+        UpdateSet &del(uint64_t keyRaw) {
+            map.insert_or_assign(Hash::fromInteger(keyRaw), Update{"", "", true});
             return *this;
         }
 
@@ -613,7 +656,15 @@ class Quadrable {
         change().put(key, val).apply(txn);
     }
 
+    void put(lmdb::txn &txn, uint64_t key, std::string_view val) {
+        change().put(key, val).apply(txn);
+    }
+
     void del(lmdb::txn &txn, std::string_view key) {
+        change().del(key).apply(txn);
+    }
+
+    void del(lmdb::txn &txn, uint64_t key) {
         change().del(key).apply(txn);
     }
 
@@ -755,6 +806,19 @@ class Quadrable {
         getMultiAux(txn, depth, nodeId, map.begin(), map.end());
     }
 
+    void getMultiInteger(lmdb::txn &txn, GetMultiIntegerQuery &queryMap) {
+        GetMultiInternalMap map;
+
+        for (auto &[key, res] : queryMap) {
+            map.emplace(Hash::fromInteger(key), res);
+        }
+
+        uint64_t depth = 0;
+        auto nodeId = getHeadNodeId(txn);
+
+        getMultiAux(txn, depth, nodeId, map.begin(), map.end());
+    }
+
     void getMultiAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, GetMultiInternalMap::iterator begin, GetMultiInternalMap::iterator end) {
         if (begin == end) {
             return;
@@ -791,6 +855,7 @@ class Quadrable {
         }
     }
 
+
     bool get(lmdb::txn &txn, const std::string_view key, std::string_view &val) {
         GetMultiQuery query;
 
@@ -806,6 +871,22 @@ class Quadrable {
         return false;
     }
 
+    bool get(lmdb::txn &txn, uint64_t key, std::string_view &val) {
+        GetMultiIntegerQuery query;
+
+        auto rec = query.emplace(key, GetMultiResult{});
+
+        getMultiInteger(txn, query);
+
+        if (rec.first->second.exists) {
+            val = rec.first->second.val;
+            return true;
+        }
+
+        return false;
+    }
+
+
     GetMultiQuery get(lmdb::txn &txn, std::set<std::string> keys) {
         GetMultiQuery query;
 
@@ -814,6 +895,18 @@ class Quadrable {
         }
 
         getMulti(txn, query);
+
+        return query;
+    }
+
+    GetMultiIntegerQuery get(lmdb::txn &txn, std::set<uint64_t> keys) {
+        GetMultiIntegerQuery query;
+
+        for (auto &key : keys) {
+            query.emplace(key, GetMultiResult{});
+        }
+
+        getMultiInteger(txn, query);
 
         return query;
     }
