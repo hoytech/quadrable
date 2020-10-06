@@ -507,7 +507,7 @@ Quadrable includes some convenience wrappers for efficiently using the sparse me
 
 ![](docs/integer-keys.svg)
 
-The key layout works by have a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits are used for which sub-tree to select. This layout was chosen for the following properties:
+The key layout works by having a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits provide paths to the various sub-trees. This layout was chosen for the following reasons:
 
 * The items are sorted in the tree by key. As well as allowing in-order iteration, proofs for adjacent keys becomes much smaller because of Quadrable's [combined proofs](#combined-proofs) algorithm.
 * Up to `2^64 - 3` items are supported.
@@ -524,7 +524,26 @@ In order to create a proof that can be pushed onto, set the `pushable` parameter
 
 Partial trees that are constructed from these proofs allow an unlimited number of elements to be pushed on.
 
+These proofs are fairly compact. For example, a database with 1 million elements in it has a pushable proof of about 300 bytes, which you can reproduce like so:
 
+    $ quadb checkout
+    $ perl -E 'for $i (1..1_000_000) { say "value $i" }' | quadb push --stdin
+    $ quadb exportProof --pushable | wc -c
+    310
+
+Because keys are adjacent and they can take good advantage of [combined proofs](#combined-proofs), proofs for sequential ranges of keys are also small:
+
+    $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --int --stdin | wc -c
+    18010
+
+The values alone (`value 1000`, `value 1001`, ...) take up 10,000 bytes implying the proof and encoding overhead added 8,000 bytes (8 bytes per item, *including* all sibling hashes). (We're using `--int` instead of `--pushable` to avoid the pushable overhead, but it's only another 200 bytes or so).
+
+By contrast, if the keys are at random locations in the tree as per their hash value, the proofs become much larger:
+
+    $ quadb checkout
+    $ perl -E 'for $i (1..1_000_000) { say "$i,value $i" }' | quadb import
+    $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --stdin | wc -c
+    349981
 
 
 
@@ -664,6 +683,10 @@ Unless the value was the same as a previously existing one, the current head wil
 This pushes a value into the database and updates the (next pushable index)[#pushable-logs]:
 
     $ quadb push val
+
+The `--stdin` flag says to read the records from standard input, one per line:
+
+    $ perl -E 'for $i (1..1000) { say "value $i" }' | quadb push --stdin
 
 ### quadb get
 
