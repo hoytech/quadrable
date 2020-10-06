@@ -8,29 +8,6 @@ namespace quadrable { namespace proofTransport {
 
 
 
-std::string varInt(uint64_t n) {
-    if (n == 0) return std::string(1, '\0');
-
-    std::string o;
-
-    while (n) {
-        o.push_back(static_cast<unsigned char>(n & 0x7F));
-        n >>= 7;
-    }
-
-    std::reverse(o.begin(), o.end());
-
-    for (size_t i = 0; i < o.size() - 1; i++) {
-        o[i] |= 0x80;
-    }
-
-    return o;
-}
-
-
-
-
-
 enum class EncodingType {
     HashedKeys = 0,
     FullKeys = 1,
@@ -66,11 +43,11 @@ static inline std::string encodeProof(const Proof &p, EncodingType encodingType 
                 addKeyHash(strand.keyHash);
             } else if (encodingType == EncodingType::FullKeys) {
                 if (strand.key.size() == 0) throw quaderr("FullKeys specified in proof encoding, but key not available");
-                o += varInt(strand.key.size());
+                o += encodeVarInt(strand.key.size());
                 o += strand.key;
             }
 
-            o += varInt(strand.val.size());
+            o += encodeVarInt(strand.val.size());
             o += strand.val;
         } else if (strand.strandType == ProofStrand::Type::WitnessLeaf) {
             addKeyHash(strand.keyHash);
@@ -179,17 +156,6 @@ static inline Proof decodeProof(std::string_view encoded) {
         return std::string(getBytes(32 - numTrailingZeros)) + std::string(numTrailingZeros, '\0');
     };
 
-    auto getVarInt = [&](){
-        uint64_t res = 0;
-
-        while (1) {
-            uint64_t byte = getByte();
-            res = (res << 7) | (byte & 0b0111'1111);
-            if ((byte & 0b1000'0000) == 0) break;
-        }
-
-        return res;
-    };
 
     // Encoding type
 
@@ -214,12 +180,12 @@ static inline Proof decodeProof(std::string_view encoded) {
             if (encodingType == EncodingType::HashedKeys) {
                 strand.keyHash = getKeyHash();
             } else if (encodingType == EncodingType::FullKeys) {
-                auto keySize = getVarInt();
+                auto keySize = decodeVarInt(getByte);
                 strand.key = std::string(getBytes(keySize));
                 strand.keyHash = Hash::hash(strand.key).str();
             }
 
-            auto valSize = getVarInt();
+            auto valSize = decodeVarInt(getByte);
             strand.val = std::string(getBytes(valSize));
         } else if (strandType == ProofStrand::Type::WitnessLeaf) {
             strand.keyHash = getKeyHash();

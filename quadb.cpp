@@ -23,9 +23,9 @@ static const char USAGE[] =
 R"(
     Usage:
       quadb [options] init
-      quadb [options] put [--] <key> <val>
-      quadb [options] del [--] <key>
-      quadb [options] get [--] <key>
+      quadb [options] put [--int] [--] <key> <val>
+      quadb [options] del [--int] [--] <key>
+      quadb [options] get [--int] [--] <key>
       quadb [options] push [--stdin] [--] [<vals>...]
       quadb [options] export [--sep=<sep>]
       quadb [options] import [--sep=<sep>]
@@ -39,7 +39,7 @@ R"(
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [--from=<from>]
       quadb [options] gc
-      quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--pushable] [--] [<keys>...]
+      quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--int] [--pushable] [--] [<keys>...]
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
       quadb [options] mergeProof [--hex]
       quadb [options] dump-tree
@@ -400,8 +400,7 @@ void run(int argc, char **argv) {
                 keys.insert(std::stoull(key));
             }
 
-            if (args["--pushable"].asBool()) proof = db.exportProofPushable(txn, keys);
-            else proof = db.exportProofInteger(txn, keys);
+            proof = db.exportProofInteger(txn, keys, args["--pushable"].asBool());
         } else {
             std::set<std::string> keys;
 

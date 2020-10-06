@@ -768,11 +768,11 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = proofRoundtrip(db.exportProofPushable(txn, {
+        auto proof = proofRoundtrip(db.exportProofInteger(txn, {
             600,
             601,
             602,
-        }));
+        }, true));
 
 
         db.checkout();
@@ -1144,7 +1144,7 @@ void doTests() {
         equivHeads("push on a bunch of extras", [&]{
             setupDb();
 
-            proof = proofRoundtrip(db.exportProofPushable(txn));
+            proof = proofRoundtrip(db.exportProofInteger(txn, {}, true));
             origRoot = db.root(txn);
 
             auto changes = db.change();

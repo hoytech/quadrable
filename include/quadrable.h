@@ -22,9 +22,7 @@
 
 
 
-
 namespace quadrable {
-
 
 
 
@@ -48,6 +46,48 @@ std::runtime_error quaderr(const T&... value) {
 
 
 
+std::string encodeVarInt(uint64_t n) {
+    if (n == 0) return std::string(1, '\0');
+
+    std::string o;
+
+    while (n) {
+        o.push_back(static_cast<unsigned char>(n & 0x7F));
+        n >>= 7;
+    }
+
+    std::reverse(o.begin(), o.end());
+
+    for (size_t i = 0; i < o.size() - 1; i++) {
+        o[i] |= 0x80;
+    }
+
+    return o;
+}
+
+uint64_t decodeVarInt(std::function<unsigned char()> getByte) {
+    uint64_t res = 0;
+
+    while (1) {
+        uint64_t byte = getByte();
+        res = (res << 7) | (byte & 0b0111'1111);
+        if ((byte & 0b1000'0000) == 0) break;
+    }
+
+    return res;
+}
+
+uint64_t decodeVarInt(std::string_view s) {
+    size_t next = 0;
+
+    return decodeVarInt([&]{
+        if (next == s.size()) throw quaderr("premature end of varint");
+        return s[next++];
+    });
+}
+
+
+
 
 class Hash {
   public:
@@ -66,11 +106,11 @@ class Hash {
     static Hash fromInteger(uint64_t n) {
         if (n > std::numeric_limits<uint64_t>::max() - 2) throw quaderr("int range exceeded");
 
-        uint64_t bits = __builtin_clzll(n + 2);
+        uint64_t bits = 63 - __builtin_clzll(n + 2);
 
-        uint64_t offset = (1ULL << (63 - bits)) - 2;
-        auto b = std::bitset<128>(62 - bits) << (128 - 6);
-        b |= (std::bitset<128>(n - offset) << 128-6-(63-bits));
+        uint64_t offset = (1ULL << bits) - 2;
+        auto b = std::bitset<128>(bits - 1) << (128 - 6);
+        b |= (std::bitset<128>(n - offset) << (128 - 6 - bits));
 
         uint64_t w1 = (b >> 64).to_ullong();
         uint64_t w2 = ((b << 64) >> 64).to_ullong();
@@ -134,7 +174,7 @@ class Hash {
         return n + offset;
     }
 
-    static Hash pushLengthHash() {
+    static Hash nextPushableSentinel() {
         Hash h;
 
         memset(h.data, '\0', sizeof(h.data));
@@ -464,21 +504,19 @@ class Quadrable {
             return *this;
         }
 
-        // FIXME: Don't assume little endianness
-
         UpdateSet &push(lmdb::txn &txn, std::string_view val) {
-            auto pushLengthHash = Hash::pushLengthHash();
+            auto nextPushableSentinel = Hash::nextPushableSentinel();
 
             uint64_t index = 0;
             std::string_view indexSv;
 
-            if (map.find(pushLengthHash) != map.end()) {
-                index = lmdb::from_sv<uint64_t>(map[pushLengthHash].val);
-            } else if (db->getRaw(txn, pushLengthHash.sv(), indexSv)) {
-                index = lmdb::from_sv<uint64_t>(indexSv);
+            if (map.find(nextPushableSentinel) != map.end()) {
+                index = decodeVarInt(map[nextPushableSentinel].val);
+            } else if (db->getRaw(txn, nextPushableSentinel.sv(), indexSv)) {
+                index = decodeVarInt(indexSv);
             }
 
-            map.insert_or_assign(pushLengthHash, Update{"", std::string(lmdb::to_sv<uint64_t>(index + 1)), false});
+            map.insert_or_assign(nextPushableSentinel, Update{"", encodeVarInt(index + 1), false});
             map.insert_or_assign(Hash::fromInteger(index), Update{"", std::string(val), false});
 
             return *this;
@@ -992,33 +1030,25 @@ class Quadrable {
         return exportProofRaw(txn, keyHashes);
     }
 
-    Proof exportProofInteger(lmdb::txn &txn, const std::set<uint64_t> &keys) {
+    Proof exportProofInteger(lmdb::txn &txn, const std::set<uint64_t> &keys = {}, bool pushable = false) {
         ProofHashes keyHashes;
 
         for (auto &key : keys) {
             keyHashes.emplace(Hash::fromInteger(key), "");
         }
 
-        return exportProofRaw(txn, keyHashes);
-    }
+        if (pushable) {
+            auto nextPushableSentinel = Hash::nextPushableSentinel();
+            uint64_t index = 0;
+            std::string_view indexSv;
 
-    Proof exportProofPushable(lmdb::txn &txn, const std::set<uint64_t> &keys = {}) {
-        ProofHashes keyHashes;
+            if (getRaw(txn, nextPushableSentinel.sv(), indexSv)) {
+                index = decodeVarInt(indexSv);
+            }
 
-        for (auto &key : keys) {
-            keyHashes.emplace(Hash::fromInteger(key), "");
+            keyHashes.emplace(Hash::nextPushableSentinel(), "");
+            keyHashes.emplace(Hash::fromInteger(index), "");
         }
-
-        auto pushLengthHash = Hash::pushLengthHash();
-        uint64_t index = 0;
-        std::string_view indexSv;
-
-        if (getRaw(txn, pushLengthHash.sv(), indexSv)) {
-            index = lmdb::from_sv<uint64_t>(indexSv);
-        }
-
-        keyHashes.emplace(Hash::pushLengthHash(), "");
-        keyHashes.emplace(Hash::fromInteger(index), "");
 
         return exportProofRaw(txn, keyHashes);
     }

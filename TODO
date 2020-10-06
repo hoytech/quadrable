@@ -1,6 +1,6 @@
 lib
   ! tests for diff and mergeProof
-  ! exporting proof of 0 keys should just return a root witness
+  ! exporting proof of 0 keys should return a root witness
 
   - proof suitable for deletion (uses witnessLeafs instead of witnesses where necessary)
     - WitnessBranch
