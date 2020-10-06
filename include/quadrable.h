@@ -1237,6 +1237,8 @@ class Quadrable {
             }
         }
 
+        if (accums.size() == 0) throw quaderr("empty proof");
+
         accums.back().next = -1;
 
 

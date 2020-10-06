@@ -391,8 +391,8 @@ Furthermore, a tree structure will be useful when computing a new root after mak
 
 There are a variety of ways that merkle-tree proofs can be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialise this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
-* `CompactNoKeys` (0): An encoding with strands and commands that will be described in the following sections. It tries to make the smallest proofs possible, but the optimiser still has room for improvement.
-* `CompactWithKeys` (1): The same as the previous, but the keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no-keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking).
+* `HashedKeys` (0): An encoding where the hashes of keys are included in the proof. Each "hash" is prefixed with a byte that incidicates the number of trailing 0 bytes in the hash. This is useful for keys that aren't actually hashes, in particular integer keys.
+* `FullKeys` (1): Full keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no-keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking). These proofs can only be created from a tree that has key tracking enabled.
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate the encoding type of an encoded proof, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
 
@@ -409,7 +409,7 @@ The first byte is the version byte described above, followed by serialised lists
     [ProofStrand]+
     [ProofCmd]*
 
-* The sort order is significant for both lists. For strands it must be sorted by keyHash (even with `CompactWithKeys` proofs where keys are included instead of keyHashes). For commands the order is the sequence that the commands will be processed.
+* The sort order is significant for both lists. For strands it must be sorted by keyHash (even with `FullKeys` proofs where keys are included instead of keyHashes). For commands the order is the sequence that the commands will be processed.
 * At the end of the lists of strands, a special "Invalid" strand signifies the end of the strand list, and that the commands follow.
 * The commands are just processed until the end of the encoded string.
 
@@ -418,17 +418,20 @@ Here is how each strand is encoded:
     [1 byte strand type, Invalid means end of strands]
     [1 byte depth]
     if Leaf
-      if CompactNoKeys:
+      if HashedKeys:
+        [1 byte num trailing 0s]
         [32 byte keyHash]
-      else if CompactWithKeys:
+      else if FullKeys:
         [varint size of key]
         [N-byte key]
       [varint size of val]
       [N-byte val]
     else if WitnessLeaf
+      [1 byte num trailing 0s]
       [32 byte keyHash]
       [32 byte valHash]
     else if WitnessEmpty
+      [1 byte num trailing 0s]
       [32 byte keyHash]
 
 * A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is the base 128 integer with the fewest possible digits, most significant digit first, with the most significant bit set on all but the last digit.
@@ -766,7 +769,7 @@ This command constructs an encoded proof for the supplied keys against the curre
     0x0000030e42f327ee3cfa7ccfc084a0bb68d05eb627610303012a67afbf1ecd9b0d32fa0568656c6c6f0201b5553de315e0edf504d9150af82dafa5c4667fa618ed0a6f19c69b41166c55100b42b6393c1f53060fe3ddbfcd7aadcca894465a5a438f69c87d790b2299b9b201a030ffe62a3cecb0c0557a8f4c2d648c7407bb5e90e2bd490e97e3447a0d4c081b7400
 
 * The list of keys to prove should be provided as arguments. They can be keys that exist in the database (in which case their values are embedded into the proof), or keys that don't (in which case a non-inclusion proof is sent).
-* The default [proof encoding](#proof-encodings) is `CompactNoKeys`, but this can be changed with `--format`.
+* The default [proof encoding](#proof-encodings) is `HashedKeys`, but this can be changed with `--format`.
 * `--hex` causes the output to be in hexadecimal (with a `0x` prefix). By default raw binary data will be printed.
 * The example above puts the keys after `--`. This is in case you have a key beginning with `-` it won't be interpreted as an option.
 * `--dump` prints a human-readable version of the proof (pre-encoding). This can be helpful for debugging.
@@ -786,7 +789,7 @@ If the proof is in hex and is stored in a file `my-proof`, import it like this:
 The tree can now be read from and updated as usual, as long as no un-proved records are accessed (if they are, an error will be thrown). Proofs can also be exported *from* this partial-tree.
 
 * `--hex` must be used if the proof is in hexadecimal.
-* [Enumeration by key](#key-tracking) is only possible if the `CompactWithKeys` proof encoding was specified.
+* [Enumeration by key](#key-tracking) is only possible if the `FullKeys` proof encoding was specified.
 
 ### quadb mergeProof
 
@@ -945,7 +948,7 @@ First, copy the `Quadrable.sol` file into your project's `contracts/` directory,
 
 To validate a Quadrable proof in a smart contract, you need two items:
 
-* `bytes encodedProof` - This is a variable-length byte-array, as output by [quadb exportProof](#quadb-exportproof) (must be `CompactNoKeys` encoding).
+* `bytes encodedProof` - This is a variable-length byte-array, as output by [quadb exportProof](#quadb-exportproof) (must be `HashedKeys` encoding).
 * `bytes32 trustedRoot` - This is a hash of a root node from a trusted source (perhaps from storage, or provided by a trusted user).
 
 Once you have these, load the proof into memory with `Quadrable.importProof()`. This creates a new tree and returns a memory address pointing to the root node:
@@ -1005,7 +1008,7 @@ Each node is 64 bytes and consists of a 32-byte nodeContents followed by a 32-by
 
 ### Limitations of Solidity Implementation
 
-* Only the `CompactNoKeys` proof encoding is supported. This means that enumeration by key is not possible.
+* Only the `HashedKeys` proof encoding is supported. This means that enumeration by key is not possible.
 * Unlike the C++ library, the Solidity implementation does not support deletion. This may be implemented in the future, but for now protocols should use some sensible empty-like value if they wish to support removals (such as all 0 bytes, or the empty string). The proof creation code also needs to be updated to be able to create deletion-capable proofs (see [bubbling](#bubbling)).
 * The Solidity implementation does *not* use [copy-on-write](#copy-on-write), so multiple versions of the tree can not exist simultaneously. Instead, the tree is updated in-place during modifications (nodes are reused when possible). After a `put()`, the old root node address becomes invalid. This is done to limit the amount of memory consumed.
 * Unlike the C++ implementation operations can not be [batched](#operation-batching). This is complicated to do in Solidity because dynamic memory management is difficult. Nevertheless, this may be an area for future optimisation.

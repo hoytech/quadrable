@@ -39,7 +39,7 @@ R"(
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [--from=<from>]
       quadb [options] gc
-      quadb [options] exportProof [--format=(noKeys|withKeys)] [--hex] [--dump] [--] <keys>...
+      quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--pushable] [--] [<keys>...]
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
       quadb [options] mergeProof [--hex]
       quadb [options] dump-tree
@@ -391,15 +391,28 @@ void run(int argc, char **argv) {
 
         std::cout << "Collected " << stats.collected << "/" << stats.total << " nodes" << std::endl;
     } else if (args["exportProof"].asBool()) {
-        std::set<std::string> keys;
+        quadrable::Proof proof;
 
-        for (auto &key : args["<keys>"].asStringList()) {
-            keys.insert(key);
+        if (args["--pushable"].asBool() || args["--int"].asBool()) {
+            std::set<uint64_t> keys;
+
+            for (auto &key : args["<keys>"].asStringList()) {
+                keys.insert(std::stoull(key));
+            }
+
+            if (args["--pushable"].asBool()) proof = db.exportProofPushable(txn, keys);
+            else proof = db.exportProofInteger(txn, keys);
+        } else {
+            std::set<std::string> keys;
+
+            for (auto &key : args["<keys>"].asStringList()) {
+                keys.insert(key);
+            }
+
+            proof = db.exportProof(txn, keys);
         }
 
-        auto proof = db.exportProof(txn, keys);
-
-        std::string format = "noKeys";
+        std::string format = "HashedKeys";
         if (args["--format"]) format = args["--format"].asString();
 
         if (args["--dump"].asBool()) {
@@ -407,10 +420,10 @@ void run(int argc, char **argv) {
         } else {
             std::string encoded;
 
-            if (format == "noKeys") {
-                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::CompactNoKeys);
-            } else if (format == "withKeys") {
-                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::CompactWithKeys);
+            if (format == "HashedKeys") {
+                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::HashedKeys);
+            } else if (format == "FullKeys") {
+                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::FullKeys);
             } else {
                 throw quaderr("unknown proof format");
             }

@@ -48,6 +48,7 @@ library Quadrable {
 
     function getStrandKeyHash(ProofState memory proof, uint256 strandIndex) private pure returns (bytes32 keyHash) {
         uint256 strandStateAddr = proof.strandStateAddr;
+        uint256 keyHashAddr;
 
         assembly {
             let addr := add(strandStateAddr, shl(7, strandIndex)) // strandIndex * 128
@@ -127,8 +128,9 @@ library Quadrable {
     function buildNodeLeaf(uint256 valAddr, uint256 valLen, uint256 keyHashAddr) private pure returns (uint256 nodeAddr) {
         uint256 nodeContents = buildNodeContentsLeaf(valAddr, valLen, keyHashAddr);
 
+        bytes32 keyHash = mloadKeyHash(keyHashAddr);
+
         assembly {
-            let keyHash := mload(keyHashAddr)
             let valHash := keccak256(valAddr, valLen)
 
             mstore(0, keyHash)
@@ -215,12 +217,25 @@ library Quadrable {
         }
     }
 
+    function mloadKeyHash(uint256 keyHashAddr) private pure returns (bytes32 keyHash) {
+        uint256 numTrailingZeros;
+
+        assembly {
+            numTrailingZeros := and(mload(sub(keyHashAddr, 31)), 0xFF)
+            let shiftBits := mul(8, numTrailingZeros)
+            keyHash := shl(shiftBits, shr(shiftBits, mload(add(keyHashAddr, 1))))
+        }
+    }
+
     function getNodeLeafKeyHash(uint256 nodeAddr) private pure returns (bytes32 keyHash) {
+        uint256 keyHashAddr;
+
         assembly {
             let nodeContents := mload(nodeAddr)
-            let keyHashAddr := and(shr(mul(1, 8), nodeContents), 0xFFFFFFFF)
-            keyHash := mload(keyHashAddr)
+            keyHashAddr := and(shr(mul(1, 8), nodeContents), 0xFFFFFFFF)
         }
+
+        return mloadKeyHash(keyHashAddr);
     }
 
     function getNodeLeafVal(uint256 nodeAddr) private pure returns (uint256 valAddr, uint256 valLen) {
@@ -259,7 +274,7 @@ library Quadrable {
         uint256 offset = 0; // into proof.encoded
         uint256 numStrands = 0;
 
-        require(mloadUint8(encoded, offset++) == 0, "Only CompactNoKeys encoding supported");
+        require(mloadUint8(encoded, offset++) == 0, "Only HashedKeys encoding supported");
 
         uint256 strandStateAddr;
         assembly {
@@ -276,8 +291,11 @@ library Quadrable {
 
             uint256 keyHashAddr;
             assembly { keyHashAddr := add(add(encoded, 32), offset) }
-            bytes32 keyHash = mloadBytes32(encoded, offset);
-            offset += 32;
+            {
+                uint256 numTrailingZeros = mloadUint8(encoded, offset++);
+                offset += 32 - numTrailingZeros;
+            }
+            bytes32 keyHash = mloadKeyHash(keyHashAddr);
 
             uint256 nodeContents;
             bytes32 valHash;
@@ -557,8 +575,9 @@ library Quadrable {
 
         assembly {
             keyHashAddr := mload(0x40)
-            mstore(keyHashAddr, keyHash)
-            mstore(0x40, add(keyHashAddr, 32))
+            mstore(keyHashAddr, 0) // numTrailingZeros
+            mstore(add(keyHashAddr, 1), keyHash)
+            mstore(0x40, add(keyHashAddr, 33))
 
             valLen := mload(val)
             valAddr := add(val, 32)
