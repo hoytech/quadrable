@@ -238,6 +238,17 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 
 
+### Pushable Logs
+
+Quadrable's sparse merkle tree data structure can also be used for pushable logs. In this case, the order of insertion determines the key, which is represented as an increasing integer.
+
+![](docs/integer-keys.svg)
+
+
+
+
+
+
 
 ## Proofs
 
@@ -400,8 +411,7 @@ Unlike the C++ implementation which first decodes to the `quadrable::Proof` inte
 
 
 
-
-### Compact encoding
+#### External representation
 
 The first byte is the version byte described above, followed by serialised lists of strands and commands:
 
@@ -419,7 +429,7 @@ Here is how each strand is encoded:
     [1 byte depth]
     if Leaf
       if HashedKeys:
-        [1 byte num trailing 0s]
+        [1 byte number trailing 0s in keyHash]
         [32 byte keyHash]
       else if FullKeys:
         [varint size of key]
@@ -427,14 +437,15 @@ Here is how each strand is encoded:
       [varint size of val]
       [N-byte val]
     else if WitnessLeaf
-      [1 byte num trailing 0s]
+      [1 byte number trailing 0s in keyHash]
       [32 byte keyHash]
       [32 byte valHash]
     else if WitnessEmpty
-      [1 byte num trailing 0s]
+      [1 byte number trailing 0s in keyHash]
       [32 byte keyHash]
 
 * A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is the base 128 integer with the fewest possible digits, most significant digit first, with the most significant bit set on all but the last digit.
+* The "number of trailing 0s" fields affect the following keyHashes which allows keyHashes to take up less space if they have trailing 0 bytes. This is useful for (pushable logs)[pushable-logs] since they use integer keys which are much shorter than hashes.
 * The strand types are as follows:
   * `0`: Leaf (chosen to be 0 since this is probably the most common, and 0 bytes are cheaper in Ethereum calldata)
   * `1`: Invalid
