@@ -39,7 +39,7 @@ R"(
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [--from=<from>]
       quadb [options] gc
-      quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--int] [--pushable] [--] [<keys>...]
+      quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--int] [--pushable] [--stdin] [--] [<keys>...]
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
       quadb [options] mergeProof [--hex]
       quadb [options] dump-tree
@@ -393,10 +393,24 @@ void run(int argc, char **argv) {
     } else if (args["exportProof"].asBool()) {
         quadrable::Proof proof;
 
+        std::vector<std::string> keysOrig;
+
+        if (args["--stdin"].asBool()) {
+            std::string line;
+
+            while (std::getline(std::cin, line)) {
+                keysOrig.push_back(line);
+            }
+        } else {
+            for (auto &key : args["<keys>"].asStringList()) {
+                keysOrig.push_back(key);
+            }
+        }
+
         if (args["--pushable"].asBool() || args["--int"].asBool()) {
             std::set<uint64_t> keys;
 
-            for (auto &key : args["<keys>"].asStringList()) {
+            for (auto &key : keysOrig) {
                 keys.insert(std::stoull(key));
             }
 
@@ -404,7 +418,7 @@ void run(int argc, char **argv) {
         } else {
             std::set<std::string> keys;
 
-            for (auto &key : args["<keys>"].asStringList()) {
+            for (auto &key : keysOrig) {
                 keys.insert(key);
             }
 
