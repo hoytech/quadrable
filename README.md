@@ -517,14 +517,14 @@ The key layout works by having a sequence of sub-trees, each of which is twice a
 
 A common use-case for integer keys is to maintain an appendable list, also known as a *log*. To append items you should use the `push` methods which will manage a special *next pushable index* field. This field contains an increasing integer that can be used to find the next index available to be pushed to.
 
-In order to create a proof that can be pushed onto, set the `pushable` parameter of `exportProofInteger` to `true`, or pass the `--pushable` flag to `quadb exportProof`. This adds the following to the proof (in addition to any other indices you requested):
+In order to create a proof that can be pushed onto, pass the `--pushable` flag to `quadb exportProof` (or set the `pushable` parameter of `exportProofInteger` to `true` in C++). This adds the following to the proof (in addition to any other indices you requested):
 
-* Adds an inclusion proof for the next pushable index field (or a non-inclusion if it's not yet set)
-* Adds a non-inclusion proof for the value stored in the next pushable index field (or `0` if next pushable not yet set)
+* An inclusion proof for the next pushable index field (or a non-inclusion if it's not yet set)
+* A non-inclusion proof for the value stored in the next pushable index field (or `0` if next pushable not yet set)
 
 Partial trees that are constructed from these proofs allow an unlimited number of elements to be pushed on.
 
-These proofs are fairly compact. For example, a database with 1 million elements in it has a pushable proof of about 300 bytes, which you can reproduce like so:
+These proofs are fairly compact. For example, a database with 1 million elements in it has a pushable proof of about 300 bytes:
 
     $ quadb checkout
     $ perl -E 'for $i (1..1_000_000) { say "value $i" }' | quadb push --stdin
@@ -536,7 +536,7 @@ Because keys are adjacent and they can take good advantage of [combined proofs](
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --int --stdin | wc -c
     18010
 
-The values alone (`value 1000`, `value 1001`, ...) take up 10,000 bytes implying the proof and encoding overhead added 8,000 bytes (8 bytes per item, *including* all sibling hashes). (We're using `--int` instead of `--pushable` to avoid the pushable overhead, but it's only another 200 bytes or so).
+The values alone (`value 1000`, `value 1001`, ...) take up 10,000 bytes which implies the proof and encoding overhead is around 8,000 bytes (8 bytes per item, *including* all sibling hashes). (We're using `--int` instead of `--pushable` to avoid the pushable overhead, but that's only another 200 bytes or so).
 
 By contrast, if the keys are at random locations in the tree as per their hash value, the proofs become much larger:
 
