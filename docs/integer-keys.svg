@@ -147,8 +147,8 @@
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
      inkscape:zoom="1.979899"
-     inkscape:cx="121.81329"
-     inkscape:cy="170.38887"
+     inkscape:cx="162.2194"
+     inkscape:cy="190.59192"
      inkscape:document-units="mm"
      inkscape:current-layer="layer1"
      showgrid="false"
@@ -520,17 +520,17 @@
     <text
        xml:space="preserve"
        style="font-style:normal;font-weight:normal;font-size:3.83795953px;line-height:1.25;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.09594898"
-       x="212.26086"
-       y="57.132416"
+       x="209.08591"
+       y="57.661583"
        id="text1301"><tspan
          sodipodi:role="line"
          id="tspan1299"
-         x="212.26086"
-         y="57.132416"
-         style="stroke-width:0.09594898">next available</tspan><tspan
+         x="209.08591"
+         y="57.661583"
+         style="stroke-width:0.09594898">next pushable</tspan><tspan
          sodipodi:role="line"
-         x="212.26086"
-         y="61.929867"
+         x="209.08591"
+         y="62.459034"
          style="stroke-width:0.09594898"
          id="tspan1303">index</tspan></text>
     <text

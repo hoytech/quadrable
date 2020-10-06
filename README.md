@@ -238,12 +238,6 @@ In order to keep all leaves collapsed to the lowest possible depth, a deletion m
 
 
 
-### Pushable Logs
-
-Quadrable's sparse merkle tree data structure can also be used for pushable logs. In this case, the order of insertion determines the key, which is represented as an increasing integer.
-
-![](docs/integer-keys.svg)
-
 
 
 
@@ -499,6 +493,32 @@ One interesting consequence of the [caching optimisation](#sparseness) that make
 
 
 
+## Integer Keys
+
+Quadrable includes some convenience wrappers for efficiently using the sparse merkle tree with integer keys. In this case, the keys are *not* hashed prior to inserting into the tree. Instead, there is a special encoding for integers that places the integers in a convenient layout within the tree.
+
+![](docs/integer-keys.svg)
+
+The key layout works by have a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits are used for which sub-tree to select. This layout was chosen for the following properties:
+
+* The items are sorted in the tree by key. As well as allowing in-order iteration, proofs for adjacent keys becomes much smaller because of Quadrable's [combined proofs](#combined-proofs) algorithm.
+* Up to `2^64 - 3` items are supported.
+* Trees aren't excessively deep when the number of items is small. An alternative approach might be to use the full 64-bits of an integer as a key (MSB first), however this would create a tree of depth 64, even with only 2 elements.
+
+### Pushable Logs
+
+A common use-case for integer keys is to maintain an appendable list, also known as a *log*. To append items you should use the `push` methods which will manage a special *next pushable index* field. This field contains an increasing integer that can be used to find the next index available to be pushed to.
+
+In order to create a proof that can be pushed onto, set the `pushable` parameter of `exportProofInteger` to `true`, or pass the `--pushable` flag to `quadb exportProof`. This adds the following to the proof (in addition to any other indices you requested):
+
+* Adds an inclusion proof for the next pushable index field (or a non-inclusion if it's not yet set)
+* Adds a non-inclusion proof for the value stored in the next pushable index field (or `0` if next pushable not yet set)
+
+Partial trees that are constructed from these proofs allow an unlimited number of elements to be pushed on.
+
+
+
+
 
 ## Storage
 
@@ -630,6 +650,12 @@ Unless the value was the same as a previously existing one, the current head wil
     $ quadb status
     Head: master
     Root: 0x0b84df4f4677733fe0956d3e4853868f54a64d0f86ecfcb3712c18e29bd8249c (1)
+
+### quadb put
+
+This pushes a value into the database and updates the (next pushable index)[#pushable-logs]:
+
+    $ quadb push val
 
 ### quadb get
 
@@ -930,9 +956,54 @@ Use the following to avoid unnecessary tree traversals:
     auto recs = db.get(txn, { "key1", "key2", });
     if (recs["key1"].exists) std::cout << recs["key1"].val;
 
-**Important**: In both of the above cases, the values are [string_view](https://github.com/hoytech/lmdbxx#string_view)s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort (whichever comes first). If you need to keep a value around longer, put it into a string. This copies the data to your program's heap:
+If you are using [integer keys](#integer-keys) pass `uint64_t`s to get instead:
+
+    std::string_view val;
+    bool exists = db.get(txn, 1000, val);
+
+**Important**: In all of the above cases, the values are [string_view](https://github.com/hoytech/lmdbxx#string_view)s that point into the LMDB memory map. This means that they are valid only up until a write operation is done on the transaction, or the transaction is terminated with commit/abort (whichever comes first). If you need to keep a value around longer, put it into a string. This copies the data to your program's heap:
 
     std::string key1ValCopy(recs["key1"].val);
+
+### Push
+
+In order to push elements onto the database to implement a [pushable log](#pushable-logs), you can use the `push` method:
+
+    db.change()
+      .push(txn, "val1")
+      .push(txn, "val2")
+      .apply(txn);
+
+Note that unlike `.put()` and `.del()`, a transaction must be passed to `push`. This is because it needs to read the next pushable index from the database. The transaction must be the same as the one eventually passed to `apply`.
+
+
+### Proofs
+
+The `exportProof` function creates inclusion/non-inclusion proofs for the specified keys. You can then use the `encodeProof` function to encode it to the compact external representation:
+
+    auto proof = db.exportProof(txn, { "key1", "key2", });
+
+    std::string encodedProof = quadrable::proofTransport::encodeProof(proof);
+
+The second argument to `exportProof` is a `std::set<std::string>` so you can build up the list of keys programmatically if you desire.
+
+The complement function is called `importProof`:
+
+    auto proof = quadrable::proofTransport::decodeProof(encodedProof);
+
+    db.importProof(txn, proof, trustedRoot);
+
+If the resulting partial tree root does not match `trustedRoot` then an exception will be thrown and your head will not be altered. You can omit this argument to avoid this check, although be aware that you are importing an unverified proof if you do this.
+
+On success, your head will point to the partial tree resulting from the proof. Queries for the specified keys (`key1` and `key2`) will succeed (even if they are not in the database -- that is a non-inclusion proof), and queries for other keys will throw exceptions.
+
+In order to prove integer keys, you use the `exportProofInteger` method instead:
+
+    auto proof = db.exportProof(txn, { 100, 101, 102, 103, }, true);
+
+If the third argument is true, the proof will create a [pushable](#pushable-logs) partial tree.
+
+
 
 ### Garbage Collection
 
@@ -970,6 +1041,8 @@ Use `Quadrable.getNodeHash()` to retrieve the hash of this node and ensure that 
 
     require(Quadrable.getNodeHash(rootNodeAddr) == trustedRoot, "proof invalid");
 
+#### get
+
 Now that you have authenticated the partial tree created from the proof, you can begin to use it. First the key you are interested in must be hashed:
 
     bytes32 keyHash = keccak256(abi.encodePacked("my key"));
@@ -980,13 +1053,33 @@ Now that you have authenticated the partial tree created from the proof, you can
 
 If you need to access a value multiple times, it is preferable to store the result in memory so you don't need to call `Quadrable.get()` multiple times (which is [expensive](#gas-usage)).
 
-Finally, you can modify the tree with `Quadrable.put()`. This will return a new `rootNodeAddr`, which you should use to overwrite the old root node address (since it is no longer valid):
+When using [integer keys](#integer-keys), do not hash the keys. Instead, use the `Quadrable.encodeInt()` function:
+
+    (bool found, bytes memory val) = Quadrable.get(rootNodeAddr, Quadrable.encodeInt(myInt));
+
+#### put
+
+You can modify the tree with `Quadrable.put()`. This will return a new `rootNodeAddr`, which you should use to overwrite the old root node address (since it is no longer valid):
 
     rootNodeAddr = Quadrable.put(rootNodeAddr, keyHash, "new val");
 
 `Quadrable.getNodeHash()` can now be used to retrieve the updated root incorporating your modifications:
 
     bytes32 newTrustedRoot = Quadrable.getNodeHash(rootNodeAddr);
+
+Similar to get, if using integer keys then use the `Quadrable.encodeInt()` function instead of hashing the keys.
+
+#### push
+
+If the partial tree created is [pushable](#pushable-logs) then you can use `Quadrable.push()` to append new items:
+
+    rootNodeAddr = Quadrable.push(rootNodeAddr, "new val");
+
+Note that when pushing no key is required. It adds it using the next pushable index as the key and updates this index.
+
+You can retrieve the number of elements in the log by calling `length` (which just returns the next pushable index or 0 if not set):
+
+    uint256 totalItems = Quadrable.length(rootNodeAddr);
 
 
 
