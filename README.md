@@ -507,7 +507,7 @@ One interesting consequence of the [caching optimisation](#sparseness) that make
 
 ## Integer Keys
 
-Quadrable includes a wrappers for efficiently using the sparse merkle tree with integer keys. In this case, the keys are *not* hashed prior to inserting into the tree. Instead, a special encoding for integers is used which arranges them in a convenient layout within the tree:
+Quadrable includes a wrapper for efficiently using the sparse merkle tree with integer keys. In this case, the keys are *not* hashed prior to inserting into the tree. Instead, a special encoding for integers is used which arranges them in a convenient layout within the tree:
 
 ![](docs/integer-keys.svg)
 
