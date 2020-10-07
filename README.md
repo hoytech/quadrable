@@ -1099,7 +1099,7 @@ In addition to the C++ library, there is also a [Solidity](https://solidity.read
 
 See the `README.md` file in [the solidity/ directory](https://github.com/hoytech/quadrable/tree/master/solidity) for details on how to compile and test the library.
 
-Since using blockchain storage from a smart contract is very expensive, Quadrable does not require it. In fact, avoiding storage is one of the primary reasons you might use Quadrable: An authenticated data-structure allows a smart contract to perform read and write operations on a large data-set, even if that data-set does not exist in the blockchain state at all.
+Since using blockchain storage from a smart contract is very expensive, Quadrable does not require it. In fact, avoiding storage is one of the primary reasons you might use Quadrable: An authenticated data-structure allows a smart contract to perform read and write operations on a large data-set, even if that data-set does not exist in the blockchain state at all. All of the functions in the Quadrable solidity library are [pure functions](https://solidity.readthedocs.io/en/v0.6.6/contracts.html#pure-functions).
 
 
 ### Smart Contract Usage
@@ -1120,6 +1120,8 @@ Once you have these, load the proof into memory with `Quadrable.importProof()`. 
 Use `Quadrable.getNodeHash()` to retrieve the hash of this node and ensure that it is the same as the `trustedRoot`:
 
     require(Quadrable.getNodeHash(rootNodeAddr) == trustedRoot, "proof invalid");
+
+Because the loaded proof is most likely a partial tree, you must be careful to only access values that were specified when the proof was created (either inclusion or non-inclusion). If you try to access other values, an `incomplete tree` error will be thrown with `require()`.
 
 #### get
 
@@ -1155,7 +1157,7 @@ If the partial tree created is [pushable](#pushable-logs) then you can use `Quad
 
     rootNodeAddr = Quadrable.push(rootNodeAddr, "new val");
 
-Note that when pushing no key is required. It adds it using the next pushable index as the key and updates this index.
+Note that when pushing no key is required. The value is added to the key indicated by the next pushable index, and the next pushable index is then incremented.
 
 You can retrieve the number of elements in the log by calling `length` (which just returns the next pushable index or 0 if not set):
 
