@@ -86,12 +86,12 @@ Although not required to use the library, it may help to understand the core dat
 
 * *Merkle tree*: Each version of the database is a [tree](#trees-and-exponential-growth). The leaves of this tree are the inserted records which are combined together with calls to a cryptographic hash function, creating a smaller set of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set, and this procedure continues until a single node is left, which is the root node. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
 * *Binary*: The style of merkle tree used by Quadrable combines together [exactly two](#merkle-trees) nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these alternative designs.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, for example 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) key-space. This means that hashes of keys can be used directly as each leaf's location in the tree.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, for example 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) key-space. This means that hashes of keys can be used directly as each leaf's location in the tree. Alternatively, Quadrable supports using [sequential integers as keys](#integer-keys) to implement an appendable log.
 
 Values are authenticated by exporting and importing proofs:
 
 * *Compact proofs*: In the classic description of a merkle tree, a value is proved to exist in the tree by providing a list of [witness](#proofs-and-witnesses) values as a proof. The value to be proved is hashed and then combined with the witnesses in order to reconstruct the hashes of the intermediate nodes along the path from the leaf to the root. If at the end of the list of witnesses you end up with the root hash, the value is considered authenticated. However, if you wish to authenticate multiple values in the tree at the same time then these linear proofs will contain duplicated hashes which wastes space. Additionally, some hashes that would need to be included with a proof for a single value can instead be calculated by the verifier. Quadrable's [proof encoding](#proof-encodings) never includes redundant sibling hashes, or ones that could be calculated during verification. It does this with a low overhead (approximately 0-6 bytes per proved item, not including sibling hashes).
-* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a "partial-tree" when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't modify a non-authenticated value. The new root of the partial-tree will be the same as the root would be if you made the same modifications to the full tree. After importing a proof, additional proofs that were exported from the same tree can be merged, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present (or were proved to *not* be present).
+* *Partial-trees*: Since the process of verifying a merkle proof reconstructs some intermediate nodes of the tree, Quadrable constructs a "partial-tree" when authenticating a set of values. This partial-tree can be queried in the same way as if you had the full tree locally, although it will throw errors if you try to access non-authenticated values. You can also make modifications on a partial-tree, so long as you don't attempt to modify a non-authenticated value. After an update, the new root of the partial-tree will be the same as the root would be if you made the same modifications to the full tree. Once a proof has been imported, additional proofs that were exported from the same tree can be merged in, expanding a partial-tree over time as new proofs are received. New proofs can also be generated *from* a partial-tree, as long as the values to prove are present (or were proved to *not* be present).
 
 Quadrable is a [Log Periodic](https://logperiodic.com) project.
 
@@ -153,12 +153,13 @@ The advantage of a merkle tree is that the nodeHash of the node at depth 0 (the 
 
 ### Keys
 
-In Quadrable's implementation of a merkle tree, keys are first hashed and then the bits of these hashes are used to traverse the tree to find the locations where the values are stored. A `0` bit means to use the left child of a node, and a `1` bit means use the right child:
+In Quadrable's implementation of a merkle tree, keys are 256-bits long and these bits are used to traverse the tree to find the locations where the values are stored. A `0` bit means to use the left child of a node, and a `1` bit means use the right child:
 
 ![](docs/path.svg)
 
-Keys are hashed for multiple reasons:
+When using Quadrable as a map (as opposed to a [log](#integer-keys)), keys are first hashed and these hashes are what are used to traverse the tree. Keys are hashed for multiple reasons:
 
+* Keys of any length can be supported, since a hash will always return a fixed-size output.
 * It puts a bound on the depth of the tree. Because Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we [collapse leaves](#collapsed-leaves)).
 * Since the hash function used by Quadrable is believed to be cryptographically secure (it behaves like a [random oracle](https://crypto.stackexchange.com/questions/22356/difference-between-hash-function-and-random-oracle)), the keys should be evenly distributed which reduces the average depth of the tree.
 * It is computationally expensive to find two or more distinct keys whose hashes have long common prefixes, which an adversarial user might like to do to increase the cost of traversing the tree or [the proof sizes](#proof-bloating).
@@ -310,7 +311,7 @@ After taking these observations into account, we see that if we are sending a co
 
 ![](docs/proof5.svg)
 
-By the way, consider the degenerate case of creating a proof for *all* of the leaves in a tree. In this case, no witnesses need to be sent whatsoever, since the verifier will be constructing the entire tree. Also, nothing additional needs to be sent to prove that a record does *not* exist, since the verifier has the entire set and can just check to see that it is not present.
+By the way, consider the degenerate case of creating a proof for *all* of the leaves in a tree. In this case, no witnesses need to be sent whatsoever, since the verifier will be constructing the entire tree. Also, nothing additional would need to be sent to prove that a record does *not* exist, since the verifier has the entire set and could just check to see that it is not present.
 
 
 
@@ -335,7 +336,7 @@ The second method is to present a leaf node that is on the corresponding path, b
 
 Both of these methods are proved in the same way as inclusion proofs: There is an untrusted value that will be hashed and then combined with witnesses up the tree until a candidate root node is reached. If this candidate root matches the trusted root then the non-inclusion proof is satisifed.
 
-In fact, at the proof level there is no such thing as a non-inclusion proof. The proofs provide just enough information for the verifier to construct a tree that they can use to determine the key they are interested in does not exist.
+In fact, at the proof level there is *no such thing* as a non-inclusion proof. The proofs provide just enough information for the verifier to construct a tree that they can use to determine the key they are interested in does not exist.
 
 Witness leaves are like regular proof-of-inclusion leaves except that a hash of the leaf's value is provided, not the leaf's value itself. This is because the verifier is not interested in this leaf's value (which could be large). Instead, the verifier merely wishes to ensure that this other leaf is blocking the path to where their queried leaf would have lived in the tree. Note that it is possible for a leaf to be used for a non-inclusion proof instead of a witness leaf. This can happen if a query requests the value for this leaf *and* for a non-inclusion proof that can be satisifed by this leaf. In this case there is no need to send a witness leaf since the leaf can be used for both.
 
@@ -404,7 +405,7 @@ Furthermore, a tree structure will be useful when computing a new root after mak
 
 There are a variety of ways that merkle-tree proofs can be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialise this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
-* `HashedKeys` (0): An encoding where the hashes of keys are included in the proof. Each "hash" is prefixed with a byte that incidicates the number of trailing 0 bytes in the hash. This is useful for keys that aren't actually hashes, in particular integer keys.
+* `HashedKeys` (0): An encoding where the hashes of keys are included in the proof. Each "hash" is prefixed with a byte that incidicates the number of trailing 0 bytes in the hash. This is useful for reducing the size of keys that are not hashes, in particular [integer keys](#integer-keys).
 * `FullKeys` (1): Full keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no-keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking). These proofs can only be created from a tree that has key tracking enabled.
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate the encoding type of an encoded proof, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
@@ -415,9 +416,9 @@ Unlike the C++ implementation which first decodes to the `quadrable::Proof` inte
 
 #### External representation
 
-The first byte is the version byte described above, followed by serialised lists of strands and commands:
+The first byte is the proof encoding type described above. It is followed by serialised lists of strands and commands:
 
-    [1 byte proof type]
+    [1 byte proof encoding type]
     [ProofStrand]+
     [ProofCmd]*
 
@@ -503,26 +504,26 @@ One interesting consequence of the [caching optimisation](#sparseness) that make
 
 ## Integer Keys
 
-Quadrable includes some convenience wrappers for efficiently using the sparse merkle tree with integer keys. In this case, the keys are *not* hashed prior to inserting into the tree. Instead, there is a special encoding for integers that places the integers in a convenient layout within the tree.
+Quadrable includes a wrappers for efficiently using the sparse merkle tree with integer keys. In this case, the keys are *not* hashed prior to inserting into the tree. Instead, a special encoding for integers is used which arranges them in a convenient layout within the tree:
 
 ![](docs/integer-keys.svg)
 
-The key layout works by having a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits provide paths to the various sub-trees. This layout was chosen for the following reasons:
+The key layout works by having a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits provide paths to the various sub-trees:
 
 * The items are sorted in the tree by key. As well as allowing in-order iteration, proofs for adjacent keys becomes much smaller because of Quadrable's [combined proofs](#combined-proofs) algorithm.
 * Up to `2^64 - 3` items are supported.
-* Trees aren't excessively deep when the number of items is small. An alternative approach might be to use the full 64-bits of an integer as a key (MSB first), however this would create a tree of depth 64, even with only 2 elements.
+* If we start sequentially inserting at index 0, the average height of the tree grows as more elements are inserted, and trees aren't excessively deep when the number of items is small. An alternative approach might be to use the full 64-bits of an integer as a key (MSB first). Unfortunately, this would create a tree of depth 64 even with only 2 elements.
 
 ### Pushable Logs
 
-A common use-case for integer keys is to maintain an appendable list, also known as a *log*. To append items you should use the `push` methods which will manage a special *next pushable index* field. This field contains an increasing integer that can be used to find the next index available to be pushed to.
+A common use-case for integer keys is to maintain an appendable list, also known as a *log*. To append items you should use the `push` methods which will manage a special *next pushable index* field. This field contains an increasing integer that can be used to find the next index available to be pushed to, stored as a varint (same format as described [above](#external-representation)).
 
 In order to create a proof that can be pushed onto, pass the `--pushable` flag to `quadb exportProof` (or set the `pushable` parameter of `exportProofInteger` to `true` in C++). This adds the following to the proof (in addition to any other indices you requested):
 
 * An inclusion proof for the next pushable index field (or a non-inclusion if it's not yet set)
 * A non-inclusion proof for the value stored in the next pushable index field (or `0` if next pushable not yet set)
 
-Partial trees that are constructed from these proofs allow an unlimited number of elements to be pushed on.
+Partial trees that are constructed from these proofs allow an unlimited number of elements to be appended (pushed).
 
 These proofs are fairly compact. For example, a database with 1 million elements in it has a pushable proof of about 300 bytes:
 
@@ -531,14 +532,14 @@ These proofs are fairly compact. For example, a database with 1 million elements
     $ quadb exportProof --pushable | wc -c
     310
 
-Because keys are adjacent and they can take good advantage of [combined proofs](#combined-proofs), proofs for sequential ranges of keys are also small:
+Because consecutive keys are often adjacent in the tree they can take good advantage of [combined proofs](#combined-proofs). This means that proofs for consecutive ranges of keys are also small:
 
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --int --stdin | wc -c
     18010
 
 The values alone (`value 1000`, `value 1001`, ...) take up 10,000 bytes which implies the proof and encoding overhead is around 8,000 bytes (8 bytes per item, *including* all sibling hashes). (We're using `--int` instead of `--pushable` to avoid the pushable overhead, but that's only another 200 bytes or so).
 
-By contrast, if the keys are at random locations in the tree as per their hash value, the proofs become much larger:
+By contrast, if the keys are at random locations in the tree as per their hash values, the proofs become much larger:
 
     $ quadb checkout
     $ perl -E 'for $i (1..1_000_000) { say "$i,value $i" }' | quadb import
@@ -561,12 +562,12 @@ Notice how references to the original tree remain valid after the update.
 
 This copy-on-write behaviour is why our diagrams have the arrows pointing from parent to child. Most descriptions of merkle trees have the arrows pointing the other direction, because that is the direction the hashing is performed (you must hash the children before the parents). While this is still of course true in Quadrable, in our case we decided to draw the arrows indicating how the nodes reference each-other. This is also the order of traversal when looking up a record.
 
-Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be cleaned up with a run of the [garbage collector](#garbage-collection). This scans all the trees to find unreachable nodes, and then deletes them.
+Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be cleaned up with a run of the [garbage collector](#garbage-collection). This scans all the heads to find unreachable nodes, and then deletes them.
 
 
 ### LMDB
 
-Because traversing Quadrable's tree data-structure requires reading many small records, and these reads cannot be parallelised or pipelined, it is very important to be able to read records quickly and efficiently.
+Because traversing Quadrable's tree data-structure requires reading many small records, and this usually cannot be parallelised or pipelined, it is very important to be able to read records quickly and efficiently.
 
 Quadrable's C++ implementation uses the [Lightning Memory-mapped Database](https://symas.com/lmdb/). LMDB works by memory mapping a file and using the page cache as shared memory between all the processes/threads accessing the database. When a node is accessed in the database, no copying or decoding of data needs to happen. The node is already "in memory" and in the format needed for the traversal.
 
@@ -581,7 +582,7 @@ Some implementations of hash trees store leaves and nodes in a database keyed by
 Quadrable does not do this. Instead, every time a node is added, a numeric 64-bit incrementing `nodeId` is allocated and the node is stored with this key. Although records are not de-duplicated, there are several advantages to this scheme:
 
 * Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, the top few levels of nodes in a tree are likely to reside in the same or nearby B+ tree pages.
-* When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree. Since nodeIds are never reused, nobody could've "grabbed it back".
+* When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree. Since a nodeId is never reused, nobody could've "grabbed it back".
 * Intermediate nodes don't store the hashes of their two children nodes, but instead just the nodeIds. This means these references occupy `8*2 = 16` bytes, rather than `32*2 = 64`.
 
 ### nodeType
@@ -678,16 +679,6 @@ Unless the value was the same as a previously existing one, the current head wil
     Head: master
     Root: 0x0b84df4f4677733fe0956d3e4853868f54a64d0f86ecfcb3712c18e29bd8249c (1)
 
-### quadb push
-
-This pushes a value into the database and updates the (next pushable index)[#pushable-logs]:
-
-    $ quadb push val
-
-The `--stdin` flag says to read the records from standard input, one per line:
-
-    $ perl -E 'for $i (1..1000) { say "value $i" }' | quadb push --stdin
-
 ### quadb get
 
 This is the complement to `put`, and is used to retrieve previously set values:
@@ -713,6 +704,28 @@ If we run `status` again, we can see the root has changed back to the all-zeros 
     Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
 This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order in which records were inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting roots.
+
+### quadb push
+
+This pushes a value into the database and updates the [next pushable index](#pushable-logs):
+
+    $ quadb push val
+
+The `--stdin` flag says to read the records from standard input, one per line:
+
+    $ perl -E 'for $i (1..1000) { say "value $i" }' | quadb push --stdin
+
+### quadb length
+
+Prints out the number of records that have been [pushed](#pushable-logs) onto this database. This is the equivalent to the "next pushable index", or 0 if this has not been set
+
+    $ quadb length
+    1000
+    $ quadb push 'new record'
+    $ quadb length
+    1001
+
+Note that this should only be used if using [integer keys](#integer-keys). This value is *not* equivalent to the number of leaves in the tree. To get that number, use [quadb stats](#quadb-stats).
 
 ### quadb import
 
