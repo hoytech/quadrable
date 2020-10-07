@@ -451,7 +451,7 @@ Here is how each strand is encoded:
       [32 byte keyHash]
 
 * A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is the base 128 integer with the fewest possible digits, most significant digit first, with the most significant bit set on all but the last digit.
-* The "number of trailing 0s" fields affect the following keyHashes which allows keyHashes to take up less space if they have trailing 0 bytes. This is useful for (pushable logs)[pushable-logs] since they use integer keys which are much shorter than hashes.
+* The "number of trailing 0s" fields affect the following keyHashes which allows keyHashes to take up less space if they have trailing 0 bytes. This is useful for [pushable logs](pushable-logs) since they use integer keys which are much shorter than hashes.
 * The strand types are as follows:
   * `0`: Leaf (chosen to be 0 since this is probably the most common, and 0 bytes are cheaper in Ethereum calldata)
   * `1`: Invalid
@@ -540,7 +540,7 @@ Because consecutive keys are often adjacent in the tree they can take good advan
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --int --stdin | wc -c
     18010
 
-The values alone (`value 1000`, `value 1001`, ...) take up 10,000 bytes which implies the proof and encoding overhead is around 8,000 bytes (8 bytes per item, *including* all sibling hashes). (We're using `--int` instead of `--pushable` to avoid the pushable overhead, but that's only another 200 bytes or so).
+The values alone (`value 1000`, `value 1001`, ...) take up 10,000 bytes, meaning the proof and encoding overhead is around 8,000 bytes (8 bytes per item, *including* all sibling hashes). (We're using `--int` instead of `--pushable` to avoid the pushable overhead, but that's only another 200 bytes or so).
 
 By contrast, if the keys are at random locations in the tree as per their hash values, the proofs become much larger:
 
@@ -1157,7 +1157,7 @@ If the partial tree created is [pushable](#pushable-logs) then you can use `Quad
 
     rootNodeAddr = Quadrable.push(rootNodeAddr, "new val");
 
-Note that when pushing no key is required. The value is added to the key indicated by the next pushable index, and the next pushable index is then incremented.
+Note that when pushing no key is required. The value is added to the next pushable index, and the next pushable index is then incremented.
 
 You can retrieve the number of elements in the log by calling `length` (which just returns the next pushable index or 0 if not set):
 
