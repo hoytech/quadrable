@@ -565,6 +565,37 @@ This copy-on-write behaviour is why our diagrams have the arrows pointing from p
 Since leaves are never deleted during an update, they can continue to exist in the database even when they are not reachable from any head (version of the database). These nodes can be cleaned up with a run of the [garbage collector](#garbage-collection). This scans all the heads to find unreachable nodes, and then deletes them.
 
 
+### Heads
+
+The way that copy-on-write is exposed is via "heads". These are sort of like the concept of "branches" in git. You have a current working head that is used to satisfy your read operations, and is affected by your write operations.
+
+At any moment in time, a head is pointing to a particular root in the database. When you make a modification, a new root results and your current head is updated to point to this root.
+
+A database can have many heads simultaneously, and it is very cheap to switch between heads and to create new ones. Here are the ways to do that:
+
+* [checkout](#quadb-checkout): This switches your current working head to another head whose name you provide. If this head does not exist, it is created and starts as an empty tree. If you provide no name at all, a new [detached head](#detached-head) is created.
+* [fork](#quadb-fork): This is like checkout, except that it overwrites the head whose name you provide with a copy of your current head (unless another is specified with `--from`). Similarly, if you don't provide a head name, it is forked to a detached head.
+
+The command-line application keeps a separate LMDB table that maintains a database-global pointer to your current working head. This means that you should avoid using the command-line application with concurrent processes. The C++ library maintains the current working head as a part of its database object though, so every process/thread has its own private current working head.
+
+#### Detached Head
+
+A detached head is just a root that doesn't exist in the `quadrable_head` table. You can think of it like a temporary working head.
+
+Detached heads are indicated like this in [quadb head](#quadb-head):
+
+    $ quadb head
+    D> [detached] : 0x9b497122189e5c9a3b8ff465ee3ab206c3c08b7984ae79805cefe7cb5e4cc38e (4472284)
+
+If you switch to another head, your detached head will be lost, so if you want to keep this data make sure you save it by forking.
+
+    $ quadb fork saved-head
+    $ quadb head
+    => saved-head : 0x9b497122189e5c9a3b8ff465ee3ab206c3c08b7984ae79805cefe7cb5e4cc38e (4472284)
+
+The command-line application keeps the current working head in a database-global table which is crawled by garbage collection, so garbage collection won't destroy the detached head checked out in the command-line app. However, this is not the case for the C++ implementation. In this case, detached heads should not outlive transactions if there is a chance that garbage collection could be run by another thread.
+
+
 ### LMDB
 
 Because traversing Quadrable's tree data-structure requires reading many small records, and this usually cannot be parallelised or pipelined, it is very important to be able to read records quickly and efficiently.
@@ -753,7 +784,7 @@ Note that the output is *not* sorted by the key. It is sorted by the hash of the
 
 ### quadb head
 
-A database can have many heads. You can view the list of heads with `quadb head`:
+A database can have many [heads](#heads). You can view the list of heads with `quadb head`:
 
     $ quadb head
     => master : 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
@@ -779,7 +810,7 @@ This new head will not appear in the `quadb head` list until we have completed a
 
 The `tempKey` record that we just inserted only exists in the `temp` head, and if we checkout back to master it would not be visible there.
 
-Running `quadb checkout` with no head name will result in a [detached head](#heads) pointing to an empty tree.
+Running `quadb checkout` with no head name will result in a [detached head](#detached-head) pointing to an empty tree.
 
 ### quadb fork
 
@@ -900,6 +931,8 @@ Quadrable's main functionality is implemented as a C++ header-only library that 
 
 Quadrable uses the [lmdbxx C++ bindings for LMDB](https://github.com/hoytech/lmdbxx) so consult its documentation as needed.
 
+Because many applications will want to store additional data alongside Quadrable databases, Quadrable does not abstract away the LMDB bindings at all. You can perform ACID transactions that update the Quadrable tables as well as your own application tables. Quadrable table names start with `quadrable_` so avoid using this prefix for your own table names.
+
 All operations must be done inside of LMDB transactions. Some operations like `get` and `exportProof` can be done inside read-only transactions, whereas others require read-write transactions.
 
 Here is an example of how to setup the LMDB environment and create a Quadrable `db`:
@@ -941,7 +974,7 @@ Although in the `quadb` application some values are presented in hexadecimal enc
 If using certain commands in the `quadb` command-line tool, care should be taken to ensure that keys/values don't embed separator characters, as described in [quadb import](#quadb-import).
 
 
-### Heads
+### Managing Heads
 
 Most of the operations described in the `quadb` command-line application have counterparts in the C++ library.
 
