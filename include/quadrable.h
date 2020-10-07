@@ -174,7 +174,7 @@ class Hash {
         return n + offset;
     }
 
-    static Hash nextPushableSentinel() {
+    static Hash nextPushable() {
         Hash h;
 
         memset(h.data, '\0', sizeof(h.data));
@@ -505,18 +505,18 @@ class Quadrable {
         }
 
         UpdateSet &push(lmdb::txn &txn, std::string_view val) {
-            auto nextPushableSentinel = Hash::nextPushableSentinel();
+            auto nextPushable = Hash::nextPushable();
 
             uint64_t index = 0;
             std::string_view indexSv;
 
-            if (map.find(nextPushableSentinel) != map.end()) {
-                index = decodeVarInt(map[nextPushableSentinel].val);
-            } else if (db->getRaw(txn, nextPushableSentinel.sv(), indexSv)) {
+            if (map.find(nextPushable) != map.end()) {
+                index = decodeVarInt(map[nextPushable].val);
+            } else if (db->getRaw(txn, nextPushable.sv(), indexSv)) {
                 index = decodeVarInt(indexSv);
             }
 
-            map.insert_or_assign(nextPushableSentinel, Update{"", encodeVarInt(index + 1), false});
+            map.insert_or_assign(nextPushable, Update{"", encodeVarInt(index + 1), false});
             map.insert_or_assign(Hash::fromInteger(index), Update{"", std::string(val), false});
 
             return *this;
@@ -1006,6 +1006,19 @@ class Quadrable {
         return query;
     }
 
+    uint64_t length(lmdb::txn &txn) {
+        auto nextPushable = Hash::nextPushable();
+
+        uint64_t index = 0;
+        std::string_view indexSv;
+
+        if (getRaw(txn, nextPushable.sv(), indexSv)) {
+            index = decodeVarInt(indexSv);
+        }
+
+        return index;
+    }
+
 
 
 
@@ -1038,15 +1051,15 @@ class Quadrable {
         }
 
         if (pushable) {
-            auto nextPushableSentinel = Hash::nextPushableSentinel();
+            auto nextPushable = Hash::nextPushable();
             uint64_t index = 0;
             std::string_view indexSv;
 
-            if (getRaw(txn, nextPushableSentinel.sv(), indexSv)) {
+            if (getRaw(txn, nextPushable.sv(), indexSv)) {
                 index = decodeVarInt(indexSv);
             }
 
-            keyHashes.emplace(Hash::nextPushableSentinel(), "");
+            keyHashes.emplace(Hash::nextPushable(), "");
             keyHashes.emplace(Hash::fromInteger(index), "");
         }
 

@@ -27,6 +27,7 @@ R"(
       quadb [options] del [--int] [--] <key>
       quadb [options] get [--int] [--] <key>
       quadb [options] push [--stdin] [--] [<vals>...]
+      quadb [options] length
       quadb [options] export [--sep=<sep>]
       quadb [options] import [--sep=<sep>]
       quadb [options] root
@@ -201,6 +202,8 @@ void run(int argc, char **argv) {
         }
 
         changes.apply(txn);
+    } else if (args["length"].asBool()) {
+        std::cout << db.length(txn) << std::endl;
     } else if (args["get"].asBool()) {
         std::string k = args["<key>"].asString();
         std::string_view v;
