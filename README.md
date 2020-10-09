@@ -408,12 +408,12 @@ Furthermore, a tree structure will be useful when computing a new root after mak
 
 There are a variety of ways that merkle-tree proofs can be encoded (whether using the strands model or otherwise). The Quadrable C++ library has a conceptual separation between a proof and its encoding. There is a `quadrable::Proof` class, and it contains an abstract description of the proof. In order to serialise this to something that can be transmitted, there is a separate `encodeProof()` function. This function takes two arguments: The proof to encode and the encoding type. So far we have the following encoding types:
 
-* `HashedKeys` (0): An encoding where the hashes of keys are included in the proof. Each "hash" is prefixed with a byte that incidicates the number of trailing 0 bytes in the hash. This is useful for reducing the size of keys that are not hashes, in particular [integer keys](#integer-keys).
+* `HashedKeys` (0): An encoding where the hashes of keys are included in the proof. Each "hash" is prefixed with a byte that indicates the number of trailing 0 bytes in the hash. This number of 0 bytes must be appended to the provided value to bring it up to 32 bytes. This is useful for reducing the size of keys that are not hashes, in particular [integer keys](#integer-keys). Since this byte hash a maximum value of 32, there is possible room for extension for other future key encodings.
 * `FullKeys` (1): Full keys (instead of the key hashes) are included in the proof. These proofs may be larger (or not) depending on the sizes of your keys. They will take slightly more CPU to verify than the no-keys version, but at the end you will have a partial-tree that supports [enumeration by key](#key-tracking). These proofs can only be created from a tree that has key tracking enabled.
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate the encoding type of an encoded proof, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
 
-Unlike the C++ implementation which first decodes to the `quadrable::Proof` intermediate representation, the Solidity implementation directly processes the compact encoding.
+Unlike the C++ implementation which first decodes to the `quadrable::Proof` intermediate representation, the Solidity implementation directly processes the external representation.
 
 
 
@@ -511,7 +511,7 @@ Quadrable includes a wrapper for efficiently using the sparse merkle tree with i
 
 ![](docs/integer-keys.svg)
 
-The key layout works by having a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits provide paths to the various sub-trees:
+The key layout works by having a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits provide paths to the various sub-trees, and there is a special location that stores the next pushable index (`0xFC0000...`, or `1111110000...` in binary).
 
 * The items are sorted in the tree by key. As well as allowing in-order iteration, proofs for adjacent keys becomes much smaller because of Quadrable's [combined proofs](#combined-proofs) algorithm.
 * Up to `2^64 - 3` items are supported.
@@ -526,16 +526,16 @@ In order to create a proof that can be pushed onto, pass the `--pushable` flag t
 * An inclusion proof for the next pushable index field (or a non-inclusion if it's not yet set)
 * A non-inclusion proof for the value stored in the next pushable index field (or `0` if next pushable not yet set)
 
-Partial trees that are constructed from these proofs allow an unlimited number of elements to be appended (pushed).
+Partial trees that are constructed from these proofs allow an unlimited number of elements to be appended (pushed). Do *not* use both integer keys and hashed keys in the same tree. If you do, then the pushable proofs may not contain enough information to push an unlimited number of elements.
 
-These proofs are fairly compact. For example, a database with 1 million elements in it has a pushable proof of about 300 bytes:
+Pushable proofs are fairly compact. For example, a database with 1 million elements in it has a pushable proof of about 300 bytes:
 
     $ quadb checkout
     $ perl -E 'for $i (1..1_000_000) { say "value $i" }' | quadb push --stdin
     $ quadb exportProof --pushable | wc -c
     310
 
-Because consecutive keys are often adjacent in the tree they can take good advantage of [combined proofs](#combined-proofs). This means that proofs for consecutive ranges of keys are also small:
+Because consecutive keys are often adjacent in the tree they can take good advantage of [combined proofs](#combined-proofs). This means that proofs for consecutive ranges of keys are also compact:
 
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --int --stdin | wc -c
     18010
