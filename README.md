@@ -28,6 +28,7 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
   * [Proof bloating](#proof-bloating)
 * [Integer Keys](#integer-keys)
   * [Pushable Logs](#pushable-logs)
+  * [Reset Pushable](#reset-pushable)
 * [Storage](#storage)
   * [Copy-On-Write](#copy-on-write)
   * [Heads](#heads)
@@ -549,6 +550,13 @@ By contrast, if the keys are at random locations in the tree as per their hash v
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --stdin | wc -c
     349981
 
+### Reset Pushable
+
+If you want to create a proof for somebody who has the root of an old version of a pushable log, you can use `resetPushable` to reset a tree to a previous number of elements. Semantically it works the same as deleting all the elements greater than a specified `n` and resetting the next pushable index to `n`, although it is implemented more efficiently.
+
+Similarly, if you receive a proof created with what is claimed to be a previous version of a tree, you can `fork` your more up to date version, `resetPushable` the `length` of the old proof, and compare the roots. This can work even if both proof creator and proof verifier have partial trees and are only interested in maintaining "recent" entries in the log. This can allow protocols to implement a form of garbage collection so database don't grow too large unnecessarily.
+
+Reset pushable lets pushable logs work in similar way to [merkle mountain ranges](https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md), in the sense that protocols can continue to use old roots even while new entries are being added. A protocol may choose to keep roots available for every hundredth entry, and require proofs to provide the intermediate data.
 
 
 ## Storage
