@@ -497,6 +497,11 @@ class Quadrable {
             return *this;
         }
 
+        UpdateSet &put(const Hash &key, std::string_view val) {
+            map.insert_or_assign(key, Update{"", std::string(val), false});
+            return *this;
+        }
+
         UpdateSet &push(lmdb::txn &txn, std::string_view val) {
             auto nextPushable = Hash::nextPushable();
 
@@ -703,13 +708,13 @@ class Quadrable {
 
 
     void apply(lmdb::txn &txn, UpdateSet &updatesOrig) {
-        // If exception is thrown, updatesOrig could be in inconsistent state, so ensure it's cleared
+        // If exception is thrown, updatesOrig could be in inconsistent state, so ensure it's cleared by moving from it
         UpdateSet updates = std::move(updatesOrig);
 
         uint64_t oldNodeId = getHeadNodeId(txn);
 
         bool bubbleUp = false;
-        auto newNode = putAux(txn, 0, oldNodeId, updates, updates.map.begin(), updates.map.end(), bubbleUp);
+        auto newNode = putAux(txn, 0, oldNodeId, updates, updates.map.begin(), updates.map.end(), bubbleUp, false);
 
         if (newNode.nodeId != oldNodeId) setHeadNodeId(txn, newNode.nodeId);
     }
@@ -744,7 +749,41 @@ class Quadrable {
         dbi_key.put(txn, lmdb::to_sv<uint64_t>(nodeId), leafKey);
     }
 
-    BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp) {
+    void resetPushable(lmdb::txn &txn, uint64_t index) {
+        if (index == 0) {
+            setHeadNodeId(txn, 0);
+            return;
+        }
+
+        uint64_t oldNodeId = getHeadNodeId(txn);
+        uint64_t newNodeId;
+
+        // Delete all nodes to the right of the index (include next pushable index)
+
+        {
+            UpdateSet updates(this);
+            updates.put(index - 1, "");
+
+            bool bubbleUp = false;
+            auto newNode = putAux(txn, 0, oldNodeId, updates, updates.map.begin(), updates.map.end(), bubbleUp, true);
+            newNodeId = newNode.nodeId;
+        }
+
+        // Insert new next pushable index
+
+        {
+            UpdateSet updates(this);
+            updates.put(Hash::nextPushable(), encodeVarInt(index));
+
+            bool bubbleUp = false;
+            auto newNode = putAux(txn, 0, newNodeId, updates, updates.map.begin(), updates.map.end(), bubbleUp, false);
+            newNodeId = newNode.nodeId;
+        }
+
+        if (newNodeId != oldNodeId) setHeadNodeId(txn, newNodeId);
+    }
+
+    BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp, bool deleteRightSide) {
         ParsedNode node(txn, dbi_node, nodeId);
         bool checkBubble = false;
 
@@ -776,7 +815,7 @@ class Quadrable {
                     return BuiltNode::empty();
                 }
 
-                if (node.nodeType == NodeType::Leaf && begin->second.val == node.leafVal()) {
+                if (deleteRightSide || (node.nodeType == NodeType::Leaf && begin->second.val == node.leafVal())) {
                     // No change to this leaf, so do nothing. Don't do this for WitnessLeaf nodes, since we need to upgrade them to leaves.
                     return BuiltNode::reuse(node);
                 }
@@ -828,8 +867,15 @@ class Quadrable {
 
         checkDepth(depth);
 
-        auto leftNode = putAux(txn, depth+1, node.leftNodeId, updates, begin, middle, checkBubble);
-        auto rightNode = putAux(txn, depth+1, node.rightNodeId, updates, middle, end, checkBubble);
+        auto leftNode = putAux(txn, depth+1, node.leftNodeId, updates, begin, middle, checkBubble, deleteRightSide);
+        auto rightNode = [&]{
+            if (deleteRightSide && middle == end) {
+                checkBubble = true;
+                return BuiltNode::empty();
+            }
+
+            return putAux(txn, depth+1, node.rightNodeId, updates, middle, end, checkBubble, deleteRightSide);
+        }();
 
         if (checkBubble) {
             if (leftNode.nodeType == NodeType::Witness || rightNode.nodeType == NodeType::Witness) {

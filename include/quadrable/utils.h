@@ -52,6 +52,9 @@ static inline void dumpDbAux(quadrable::Quadrable &db, lmdb::txn &txn, uint64_t 
         }
 
         std::cout << " = " << node.leafVal();
+
+        if (node.leafKeyHash() == Hash::nextPushable().str()) std::cout << " (varint = " << decodeVarInt(node.leafVal()) << ")";
+
         std::cout << "\n";
     } else if (node.nodeType == quadrable::NodeType::WitnessLeaf) {
         std::cout << "witness leaf: " << to_hex(node.leafKeyHash(), true) << " hash(val) = " << to_hex(node.leafValHash(), true);

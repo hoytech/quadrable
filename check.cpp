@@ -230,6 +230,23 @@ void doTests() {
         verify(val == "g");
     });
 
+    test("reset pushable", [&]{
+        for (uint64_t reset = 0; reset < 20; reset++) {
+            db.checkout();
+
+            std::string root;
+
+            for (uint64_t i = 0; i < 20; i++) {
+                if (i == reset) root = db.root(txn);
+                db.push(txn, std::to_string(i) + "_" + std::to_string(reset));
+            }
+
+            db.resetPushable(txn, reset);
+            verify(db.root(txn) == root);
+        }
+    });
+
+
 
 
     test("empty heads", [&]{
