@@ -27,6 +27,7 @@ R"(
       quadb [options] del [--int] [--] <key>
       quadb [options] get [--int] [--] <key>
       quadb [options] push [--stdin] [--] [<vals>...]
+      quadb [options] resetPushable <index>
       quadb [options] length
       quadb [options] export [--sep=<sep>]
       quadb [options] import [--sep=<sep>]
@@ -43,7 +44,7 @@ R"(
       quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--int] [--pushable] [--stdin] [--] [<keys>...]
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
       quadb [options] mergeProof [--hex]
-      quadb [options] dump-tree
+      quadb [options] dumpTree
       quadb [options] mineHash <prefix>
 
     Options:
@@ -159,7 +160,7 @@ void run(int argc, char **argv) {
 
     if (args["init"].asBool()) {
         // Do nothing
-    } else if (args["dump-tree"].asBool()) {
+    } else if (args["dumpTree"].asBool()) {
         quadrable::dumpDb(db, txn);
     } else if (args["put"].asBool()) {
         std::string k = args["<key>"].asString();
@@ -202,6 +203,13 @@ void run(int argc, char **argv) {
         }
 
         changes.apply(txn);
+    } else if (args["resetPushable"].asBool()) {
+        auto indexLong = args["<index>"].asLong();
+        if (indexLong < 0) throw quaderr("negative index");
+
+        auto index = static_cast<uint64_t>(indexLong);
+
+        db.resetPushable(txn, index);
     } else if (args["length"].asBool()) {
         std::cout << db.length(txn) << std::endl;
     } else if (args["get"].asBool()) {
