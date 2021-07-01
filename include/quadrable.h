@@ -353,26 +353,19 @@ class ParsedNode {
         }
     }
 
-    bool isLeaf() {
-        return nodeType == NodeType::Leaf || nodeType == NodeType::WitnessLeaf;
-    }
-
-    bool isBranch() {
-        return nodeType == NodeType::BranchLeft || nodeType == NodeType::BranchRight || nodeType == NodeType::BranchBoth;
-    }
-
-    bool isWitness() {
-        return nodeType == NodeType::Witness || nodeType == NodeType::WitnessLeaf;
-    }
+    bool isEmpty() { return nodeType == NodeType::Empty; }
+    bool isLeaf() { return nodeType == NodeType::Leaf || nodeType == NodeType::WitnessLeaf; }
+    bool isBranch() { return nodeType == NodeType::BranchLeft || nodeType == NodeType::BranchRight || nodeType == NodeType::BranchBoth; }
+    bool isWitness() { return nodeType == NodeType::Witness || nodeType == NodeType::WitnessLeaf; }
 
     std::string_view nodeHash() {
         static const char nullBytes[32] = {};
-        if (nodeType == NodeType::Empty) return std::string_view{nullBytes, 32};
+        if (isEmpty()) return std::string_view{nullBytes, 32};
         return raw.substr(8, 32);
     }
 
     std::string_view leafKeyHash() {
-        if (nodeType != NodeType::Leaf && nodeType != NodeType::WitnessLeaf) throw quaderr("node is not a Leaf/WitnessLeaf");
+        if (!isLeaf()) throw quaderr("node is not a Leaf/WitnessLeaf");
         return raw.substr(8 + 32, 32);
     }
 
@@ -701,6 +694,11 @@ class Quadrable {
 
             return output;
         }
+
+        bool isEmpty() { return nodeType == NodeType::Empty; }
+        bool isLeaf() { return nodeType == NodeType::Leaf || nodeType == NodeType::WitnessLeaf; }
+        bool isBranch() { return nodeType == NodeType::BranchLeft || nodeType == NodeType::BranchRight || nodeType == NodeType::BranchBoth; }
+        bool isWitness() { return nodeType == NodeType::Witness || nodeType == NodeType::WitnessLeaf; }
     };
 
 
@@ -758,7 +756,7 @@ class Quadrable {
 
         if (node.nodeType == NodeType::Witness) {
             throw quaderr("encountered witness during update: partial tree");
-        } else if (node.nodeType == NodeType::Empty) {
+        } else if (node.isEmpty()) {
             updates.eraseRange(begin, end, [&](UpdateSetMap::iterator &u){ return u->second.deletion; });
 
             if (begin == end) {
@@ -837,14 +835,14 @@ class Quadrable {
             if (leftNode.nodeType == NodeType::Witness || rightNode.nodeType == NodeType::Witness) {
                 // We don't know if one of the nodes is a branch or a leaf
                 throw quaderr("can't bubble a witness node");
-            } else if (leftNode.nodeType == NodeType::Empty && rightNode.nodeType == NodeType::Empty) {
+            } else if (leftNode.isEmpty() && rightNode.isEmpty()) {
                 bubbleUp = true;
                 return BuiltNode::empty();
-            } else if ((leftNode.nodeType == NodeType::Leaf || leftNode.nodeType == NodeType::WitnessLeaf) && rightNode.nodeType == NodeType::Empty) {
+            } else if (leftNode.isLeaf() && rightNode.isEmpty()) {
                 bubbleUp = true;
                 ParsedNode n(txn, dbi_node, leftNode.nodeId);
                 return BuiltNode::reuse(n);
-            } else if (leftNode.nodeType == NodeType::Empty && (rightNode.nodeType == NodeType::Leaf || rightNode.nodeType == NodeType::WitnessLeaf)) {
+            } else if (leftNode.isEmpty() && rightNode.isLeaf()) {
                 bubbleUp = true;
                 ParsedNode n(txn, dbi_node, rightNode.nodeId);
                 return BuiltNode::reuse(n);
@@ -907,11 +905,11 @@ class Quadrable {
 
         ParsedNode node(txn, dbi_node, nodeId);
 
-        if (node.nodeType == NodeType::Empty) {
+        if (node.isEmpty()) {
             for (auto i = begin; i != end; ++i) {
                 i->second.exists = false;
             }
-        } else if (node.nodeType == NodeType::Leaf || node.nodeType == NodeType::WitnessLeaf) {
+        } else if (node.isLeaf()) {
             for (auto i = begin; i != end; ++i) {
                 if (i->first == node.leafKeyHash()) {
                     if (node.nodeType == NodeType::WitnessLeaf) throw quaderr("encountered witness node: incomplete tree");
@@ -1092,7 +1090,7 @@ class Quadrable {
 
         ParsedNode node(txn, dbi_node, nodeId);
 
-        if (node.nodeType == NodeType::Empty) {
+        if (node.isEmpty()) {
             Hash h = begin->first;
             h.keepPrefixBits(depth);
 
@@ -1374,7 +1372,7 @@ class Quadrable {
     void walkTreeAux(lmdb::txn &txn, std::function<bool(ParsedNode &, uint64_t)> cb, uint64_t nodeId, uint64_t depth) {
         ParsedNode node(txn, dbi_node, nodeId);
 
-        if (node.nodeType == NodeType::Empty) return;
+        if (node.isEmpty()) return;
 
         if (!cb(node, depth)) return;
 
