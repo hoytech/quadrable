@@ -84,7 +84,7 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
 ## Introduction
 
 * *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications will result in a new root. Anyone who knows the root value of a database can perform remote queries on it and be confident that the responses are authentic. To accomplish this, the remote server provides a [proof](#proofs) along with each response, which is validated against the root.
-* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots or checkpoints.
+* *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots and checkpoints.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
@@ -479,7 +479,7 @@ If the most significant bit is `1` in a command byte, it is a jump:
 
 * A short jump adds 1 to the distance and adds/subtracts this from the working strand
 * A long jump adds 6 to the distance, and adds/subtracts that power of two from the working strand. This allows a proof to rapidly jump nearby to the next desired strand, even if there are huge numbers of strands. It can then narrow in with subsequent long jumps until it gets within 32, and then use a short jump to go to the exact strand. This is sort of like a varint implementation, but fits into the simple "1 byte per command" model, and doesn't permit representation of zero-length jumps (which would be pointless to support)
-* Implementations must check to make sure that a jump command does not jump outside of the list of strands. I though about making them "wrap around", which could allow some clever encoding-time optimisations, but the added complexity didn't seem worth it.
+* Implementations must check to make sure that a jump command does not jump outside of the list of strands. I thought about making them "wrap around", which could allow some clever encoding-time optimisations, but the added complexity didn't seem worth it.
 
 
 
@@ -715,7 +715,7 @@ This adds a new record to the database, or updates an existing one. On success t
 
     $ quadb put key val
 
-Unless the value was the same as a previously existing one, the current head will be updated to have a new root, and a new nodeId will be allocated for it:
+Unless the value was the same as the previously existing one, the current head will be updated to have a new root, and a new nodeId will be allocated for it:
 
     $ quadb status
     Head: master
@@ -1087,7 +1087,7 @@ On success, your head will point to the partial tree resulting from the proof. Q
 
 In order to prove integer keys, you use the `exportProofInteger` method instead:
 
-    auto proof = db.exportProof(txn, { 100, 101, 102, 103, }, true);
+    auto proof = db.exportProofInteger(txn, { 100, 101, 102, 103, }, true);
 
 If the third argument is true, the proof will create a [pushable](#pushable-logs) partial tree.
 
@@ -1261,7 +1261,7 @@ Let's assume that an attacker can create colliding keyHashes up to a depth of 16
 
 ## Author and Copyright
 
-Quadrable © 2020 Doug Hoyte.
+Quadrable © 2020-2022 Doug Hoyte.
 
 2-clause BSD license. See the LICENSE file.
 
