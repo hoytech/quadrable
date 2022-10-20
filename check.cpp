@@ -160,13 +160,17 @@ void doTests() {
     });
 
     test("integer round-trips", [&]{
-        for (uint i = 0; i < 100'000; i++) {
+        for (uint64_t i = 0; i < 100'000; i++) {
             verify(quadrable::Hash::fromInteger(i).toInteger() == i);
         }
 
-        {
-            uint64_t i = std::numeric_limits<uint64_t>::max() - 2;
+        for (uint64_t i = std::numeric_limits<uint64_t>::max() - 100'000; i <= std::numeric_limits<uint64_t>::max() - 2; i++) {
             verify(quadrable::Hash::fromInteger(i).toInteger() == i);
+        }
+
+        for (uint64_t i = 10; i <= 64; i++) {
+            uint64_t n = (1LL << i) - 5;
+            verify(quadrable::Hash::fromInteger(n).toInteger() == n);
         }
 
         {
@@ -809,7 +813,7 @@ void doTests() {
         verifyThrow(db.get(txn, n-1, val), "incomplete tree");
 
         // all >=n are available (not-present)
-        for (uint i = n; i < n*100; i++) verify(!db.get(txn, i, val));
+        for (uint64_t i = n; i < n*100; i++) verify(!db.get(txn, i, val));
     });
 
 
@@ -1165,7 +1169,7 @@ void doTests() {
             origRoot = db.root(txn);
 
             auto changes = db.change();
-            for (uint i = 0; i < 5000; i++) changes.push(txn, "new elem " + std::to_string(i));
+            for (uint64_t i = 0; i < 5000; i++) changes.push(txn, "new elem " + std::to_string(i));
             changes.apply(txn);
 
             newRoot = db.root(txn);
@@ -1173,7 +1177,7 @@ void doTests() {
             db.importProof(txn, proof, origRoot);
 
             auto changes = db.change();
-            for (uint i = 0; i < 5000; i++) changes.push(txn, "new elem " + std::to_string(i));
+            for (uint64_t i = 0; i < 5000; i++) changes.push(txn, "new elem " + std::to_string(i));
             changes.apply(txn);
 
             verify(db.root(txn) == newRoot); // also checked by equivHeads

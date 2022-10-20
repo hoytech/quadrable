@@ -124,16 +124,8 @@ class Hash {
         h.data[4] = (w1 >> (64 - 8*5)) & 0xFF;
         h.data[5] = (w1 >> (64 - 8*6)) & 0xFF;
         h.data[6] = (w1 >> (64 - 8*7)) & 0xFF;
-        h.data[7] = w1 & 0xFF;
-
+        h.data[7] = (w1 >> (64 - 8*8)) & 0xFF;
         h.data[8] = (w2 >> (64 - 8)) & 0xFF;
-        h.data[9] = (w2 >> (64 - 8*2)) & 0xFF;
-        h.data[10] = (w2 >> (64 - 8*3)) & 0xFF;
-        h.data[11] = (w2 >> (64 - 8*4)) & 0xFF;
-        h.data[12] = (w2 >> (64 - 8*5)) & 0xFF;
-        h.data[13] = (w2 >> (64 - 8*6)) & 0xFF;
-        h.data[14] = (w2 >> (64 - 8*7)) & 0xFF;
-        h.data[15] = w2 & 0xFF;
 
         return h;
     }
@@ -154,12 +146,7 @@ class Hash {
 
         w2 = data[8];
         w2 = (w2 << 8) | data[9];
-        w2 = (w2 << 8) | data[10];
-        w2 = (w2 << 8) | data[11];
-        w2 = (w2 << 8) | data[12];
-        w2 = (w2 << 8) | data[13];
-        w2 = (w2 << 8) | data[14];
-        w2 = (w2 << 8) | data[15];
+        w2 <<= 8*6;
 
         uint64_t bits = w1 >> (64 - 6);
 
