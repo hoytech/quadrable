@@ -52,11 +52,11 @@ clean: phony
 run-check: phony check
 	mkdir -p testdb/
 	rm -f testdb/*.mdb
-	time ./check
+	./check
 
 test: XCXXFLAGS += -fsanitize=address
 test: XLDFLAGS += -fsanitize=address
-test: phony run-check
+test: phony clean run-check
 
 
 coverage: XCXXFLAGS += --coverage
