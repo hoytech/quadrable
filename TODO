@@ -1,3 +1,14 @@
+next
+  switch hash function (blake3?)
+  move solidity to its own repo
+  move pushable stuff to higher layer
+  ensure pushable can be implemented without a "length" key
+    - prove biggest element exists (maybe prove 2**64-1 doesn't exist)
+  interface for making "sequenced hashes" where first 9 bytes are timestamp, remaining truncated hash
+  proof for a range of values
+  merge two trees (CRDT)
+    - network protocol for smallest proof exchange to do this with remote tree
+
 lib
   ! tests for diff and mergeProof
   ! exporting proof of 0 keys should return a root witness

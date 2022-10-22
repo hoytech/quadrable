@@ -251,8 +251,6 @@ void doTests() {
     });
 
 
-
-
     test("empty heads", [&]{
         verify(Hash::nullHash() == db.root(txn));
 
@@ -1183,6 +1181,108 @@ void doTests() {
             verify(db.root(txn) == newRoot); // also checked by equivHeads
         });
     });
+
+
+
+
+    test("iterators basic", [&]{
+        db.checkout();
+
+        auto c = db.change();
+        for (uint64_t i = 2; i < 20; i+=2) {
+            c.put(i, std::to_string(i));
+        }
+        c.apply(txn);
+
+        // Initial values
+
+        {
+            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(1));
+            verify(it.get().leafVal() == "2");
+        }
+
+        {
+            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(19), true);
+            verify(it.get().leafVal() == "18");
+        }
+
+        // Past end values
+
+        {
+            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(19));
+            verify(it.get().nodeId == 0);
+        }
+
+        {
+            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(1), true);
+            verify(it.get().nodeId == 0);
+        }
+
+        // Correct seeking behaviour
+
+        {
+            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(11));
+            verify(it.get().leafVal() == "12");
+        }
+
+        {
+            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(11), true);
+            verify(it.get().leafVal() == "10");
+        }
+
+    });
+
+
+    test("iterators full", [&]{
+        auto go = [&](uint64_t start, uint64_t end, uint64_t skip){
+            if (start < 5) throw quaderr("start too low");
+            db.checkout();
+
+            std::map<uint64_t, std::string> vals;
+
+            auto c = db.change();
+            for (uint64_t i = start; i < end; i += skip) {
+                c.put(i, std::to_string(i));
+                vals[i] = std::to_string(i);
+            }
+            c.apply(txn);
+
+            for (uint64_t i = start - 5; i < end + 5; i++) {
+                auto valsIt = vals.lower_bound(i);
+                Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(i));
+
+                while (!it.atEnd()) {
+                    verify(valsIt != vals.end());
+                    verify(it.get().leafVal() == valsIt->second);
+                    it.next();
+                    valsIt = std::next(valsIt);
+                }
+
+                verify(valsIt == vals.end());
+            }
+
+            for (uint64_t i = end + 5; i > start - 5; i--) {
+                auto valsItFwd = vals.upper_bound(i);
+                std::reverse_iterator<decltype(valsItFwd)> valsIt{valsItFwd};
+                Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(i), true);
+
+                while (!it.atEnd()) {
+                    verify(valsIt != vals.rend());
+                    verify(it.get().leafVal() == valsIt->second);
+                    it.next();
+                    valsIt = std::next(valsIt);
+                }
+
+                verify(valsIt == vals.rend());
+            }
+        };
+
+        go(5, 20, 2);
+        go(10, 200, 15);
+        go(100, 2000, 31);
+        go(4000, 5000, 82);
+    });
+
 
 
     txn.abort();
