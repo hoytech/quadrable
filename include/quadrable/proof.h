@@ -182,7 +182,7 @@ static inline Proof decodeProof(std::string_view encoded) {
             } else if (encodingType == EncodingType::FullKeys) {
                 auto keySize = decodeVarInt(getByte);
                 strand.key = std::string(getBytes(keySize));
-                strand.keyHash = Hash::hash(strand.key).str();
+                strand.keyHash = Key::hash(strand.key).str();
             }
 
             auto valSize = decodeVarInt(getByte);

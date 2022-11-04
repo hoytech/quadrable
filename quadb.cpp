@@ -26,8 +26,6 @@ R"(
       quadb [options] put [--int] [--] <key> <val>
       quadb [options] del [--int] [--] <key>
       quadb [options] get [--int] [--] <key>
-      quadb [options] push [--stdin] [--] [<vals>...]
-      quadb [options] resetPushable <index>
       quadb [options] length
       quadb [options] export [--sep=<sep>]
       quadb [options] import [--sep=<sep>]
@@ -41,7 +39,7 @@ R"(
       quadb [options] checkout [<head>]
       quadb [options] fork [<head>] [--from=<from>]
       quadb [options] gc
-      quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--int] [--pushable] [--stdin] [--] [<keys>...]
+      quadb [options] exportProof [--format=(HashedKeys|FullKeys)] [--hex] [--dump] [--int] [--stdin] [--] [<keys>...]
       quadb [options] importProof [--root=<root>] [--hex] [--dump]
       quadb [options] mergeProof [--hex]
       quadb [options] dumpTree
@@ -168,11 +166,7 @@ void run(int argc, char **argv) {
 
         auto changes = db.change();
 
-        if (args["--int"].asBool()) {
-            changes.put(std::stoull(k), v);
-        } else {
-            changes.put(k, v);
-        }
+        changes.put(k, v);
 
         changes.apply(txn);
     } else if (args["del"].asBool()) {
@@ -180,49 +174,14 @@ void run(int argc, char **argv) {
 
         auto changes = db.change();
 
-        if (args["--int"].asBool()) {
-            changes.del(std::stoull(k));
-        } else {
-            changes.del(k);
-        }
+        changes.del(k);
 
         changes.apply(txn);
-    } else if (args["push"].asBool()) {
-        auto changes = db.change();
-
-        if (args["--stdin"].asBool()) {
-            std::string line;
-
-            while (std::getline(std::cin, line)) {
-                changes.push(txn, line);
-            }
-        } else {
-            for (auto &val : args["<vals>"].asStringList()) {
-                changes.push(txn, val);
-            }
-        }
-
-        changes.apply(txn);
-    } else if (args["resetPushable"].asBool()) {
-        auto indexLong = args["<index>"].asLong();
-        if (indexLong < 0) throw quaderr("negative index");
-
-        auto index = static_cast<uint64_t>(indexLong);
-
-        db.resetPushable(txn, index);
-    } else if (args["length"].asBool()) {
-        std::cout << db.length(txn) << std::endl;
     } else if (args["get"].asBool()) {
         std::string k = args["<key>"].asString();
         std::string_view v;
 
-        bool found;
-
-        if (args["--int"].asBool()) {
-            found = db.get(txn, std::stoull(k), v);
-        } else {
-            found = db.get(txn, k, v);
-        }
+        bool found = db.get(txn, k, v);
 
         if (!found) throw quaderr("key not found in db");
         std::cout << v << std::endl;
@@ -418,23 +377,13 @@ void run(int argc, char **argv) {
             }
         }
 
-        if (args["--pushable"].asBool() || args["--int"].asBool()) {
-            std::set<uint64_t> keys;
+        std::set<std::string> keys;
 
-            for (auto &key : keysOrig) {
-                keys.insert(std::stoull(key));
-            }
-
-            proof = db.exportProofInteger(txn, keys, args["--pushable"].asBool());
-        } else {
-            std::set<std::string> keys;
-
-            for (auto &key : keysOrig) {
-                keys.insert(key);
-            }
-
-            proof = db.exportProof(txn, keys);
+        for (auto &key : keysOrig) {
+            keys.insert(key);
         }
+
+        proof = db.exportProof(txn, keys);
 
         std::string format = "HashedKeys";
         if (args["--format"]) format = args["--format"].asString();
@@ -500,7 +449,7 @@ void run(int argc, char **argv) {
 
         while(1) {
             r = distrib(gen);
-            auto h = quadrable::Hash::hash(std::to_string(r));
+            auto h = quadrable::Key::hash(std::to_string(r));
 
             size_t matched = 0;
 

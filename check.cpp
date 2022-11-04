@@ -169,7 +169,7 @@ void doTests() {
 
 
     test("empty heads", [&]{
-        verify(Hash::nullHash() == db.root(txn));
+        verify(Key::null() == db.root(txn));
 
         std::string_view val;
         verify(!db.get(txn, "hello", val));
@@ -178,10 +178,10 @@ void doTests() {
         verify(stats.numLeafNodes == 0);
 
         db.change().put("a", "1").apply(txn);
-        verify(Hash::nullHash() != db.root(txn));
+        verify(Key::null() != db.root(txn));
 
         db.change().del("a").apply(txn);
-        verify(Hash::nullHash() == db.root(txn));
+        verify(Key::null() == db.root(txn));
     });
 
 

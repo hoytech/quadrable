@@ -89,12 +89,12 @@ uint64_t decodeVarInt(std::string_view s) {
 
 
 
-class Hash {
+class Key {
   public:
-    Hash() {};
+    Key() {};
 
-    static Hash hash(std::string_view s) {
-        Hash h;
+    static Key hash(std::string_view s) {
+        Key h;
 
         Keccak k;
         k.add(s.data(), s.size());
@@ -103,17 +103,17 @@ class Hash {
         return h;
     }
 
-    static Hash existingHash(std::string_view s) {
-        Hash h;
+    static Key existing(std::string_view s) {
+        Key h;
 
-        if (s.size() != sizeof(h.data)) throw quaderr("incorrect size for existingHash");
+        if (s.size() != sizeof(h.data)) throw quaderr("incorrect size for existing");
         memcpy(h.data, s.data(), sizeof(h.data));
 
         return h;
     }
 
-    static Hash nullHash() {
-        Hash h;
+    static Key null() {
+        Key h;
 
         memset(h.data, '\0', sizeof(h.data));
 
@@ -144,20 +144,20 @@ class Hash {
     uint8_t data[32];
 };
 
-static inline bool operator <(const Hash &h1, const Hash &h2) {
+static inline bool operator <(const Key &h1, const Key &h2) {
     return memcmp(h1.data, h2.data, sizeof(h1.data)) < 0;
 }
 
-static inline bool operator ==(const Hash &h1, const Hash &h2) {
+static inline bool operator ==(const Key &h1, const Key &h2) {
     return memcmp(h1.data, h2.data, sizeof(h1.data)) == 0;
 }
 
-static inline bool operator ==(const Hash &h1, std::string_view sv) {
+static inline bool operator ==(const Key &h1, std::string_view sv) {
     if (sv.size() != sizeof(h1.data)) return false;
     return memcmp(h1.data, sv.data(), sizeof(h1.data)) == 0;
 }
 
-static inline bool operator !=(const Hash &h1, std::string_view sv) {
+static inline bool operator !=(const Key &h1, std::string_view sv) {
     return !(h1 == sv);
 }
 
@@ -173,7 +173,7 @@ struct Update {
     uint64_t nodeId = 0; // when a leaf is split, a special-case Update is created with this set
 };
 
-using UpdateSetMap = std::map<Hash, Update>;
+using UpdateSetMap = std::map<Key, Update>;
 
 
 
@@ -296,7 +296,7 @@ class ParsedNode {
 
     std::string leafValHash() {
         if (nodeType == NodeType::Leaf) {
-            return Hash::hash(leafVal()).str();
+            return Key::hash(leafVal()).str();
         } else if (nodeType == NodeType::WitnessLeaf) {
             return std::string(raw.substr(8 + 32 + 32));
         }
@@ -408,18 +408,18 @@ class Quadrable {
 
         UpdateSet &put(std::string_view keyRaw, std::string_view val) {
             if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
-            map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(db->trackKeys ? keyRaw : ""), std::string(val), false});
+            map.insert_or_assign(Key::hash(keyRaw), Update{std::string(db->trackKeys ? keyRaw : ""), std::string(val), false});
             return *this;
         }
 
-        UpdateSet &put(const Hash &key, std::string_view val) {
+        UpdateSet &put(const Key &key, std::string_view val) {
             map.insert_or_assign(key, Update{"", std::string(val), false});
             return *this;
         }
 
         UpdateSet &del(std::string_view keyRaw) {
             if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
-            map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(keyRaw), "", true});
+            map.insert_or_assign(Key::hash(keyRaw), Update{std::string(keyRaw), "", true});
             return *this;
         }
 
@@ -456,27 +456,27 @@ class Quadrable {
 
       public:
         uint64_t nodeId;
-        Hash nodeHash;
+        Key nodeHash;
         NodeType nodeType;
 
         static BuiltNode empty() {
-            return {0, Hash::nullHash(), NodeType::Empty};
+            return {0, Key::null(), NodeType::Empty};
         }
 
         static BuiltNode reuse(ParsedNode &node) {
-            return {node.nodeId, Hash::existingHash(node.nodeHash()), node.nodeType};
+            return {node.nodeId, Key::existing(node.nodeHash()), node.nodeType};
         }
 
         // For when you have a nodeId and a nodeHash, but don't need to create a ParsedNode
-        static BuiltNode stubbed(uint64_t nodeId, const Hash &nodeHash) {
+        static BuiltNode stubbed(uint64_t nodeId, const Key &nodeHash) {
             return {nodeId, nodeHash, NodeType::Invalid};
         }
 
-        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, std::string_view val, std::string_view leafKey = "") {
+        static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, const Key &keyHash, std::string_view val, std::string_view leafKey = "") {
             BuiltNode output;
 
             {
-                Hash valHash = Hash::hash(val);
+                Key valHash = Key::hash(val);
                 unsigned char nullChar = 0;
 
                 Keccak k;
@@ -512,7 +512,7 @@ class Quadrable {
             return newLeaf(db, txn, it->first, it->second.val, it->second.key);
         }
 
-        static BuiltNode newWitnessLeaf(Quadrable *db, lmdb::txn &txn, const Hash &keyHash, const Hash &valHash) {
+        static BuiltNode newWitnessLeaf(Quadrable *db, lmdb::txn &txn, const Key &keyHash, const Key &valHash) {
             BuiltNode output;
 
             {
@@ -577,7 +577,7 @@ class Quadrable {
             return output;
         }
 
-        static BuiltNode newWitness(Quadrable *db, lmdb::txn &txn, const Hash &hash) {
+        static BuiltNode newWitness(Quadrable *db, lmdb::txn &txn, const Key &hash) {
             std::string nodeRaw;
 
             nodeRaw += lmdb::to_sv<uint64_t>(uint64_t(NodeType::Witness));
@@ -693,7 +693,7 @@ class Quadrable {
 
             if (!deleteThisLeaf) {
                 // emplace() ensures that we don't overwrite any updates to this leaf already in the UpdateSet.
-                auto emplaceRes = updates.map.emplace(Hash::existingHash(node.leafKeyHash()), Update{"", "", false, node.nodeId});
+                auto emplaceRes = updates.map.emplace(Key::existing(node.leafKeyHash()), Update{"", "", false, node.nodeId});
 
                 // If we did insert it, and it went before the start of our iterator window, back up our iterator to include it.
                 //   * This happens when the leaf we are splitting is to the left of the leaf we are adding.
@@ -749,13 +749,13 @@ class Quadrable {
 
 
 
-    using GetMultiInternalMap = std::map<Hash, GetMultiResult &>;
+    using GetMultiInternalMap = std::map<Key, GetMultiResult &>;
 
     void getMultiRaw(lmdb::txn &txn, GetMultiQuery &queryMap) {
         GetMultiInternalMap map;
 
         for (auto &[key, res] : queryMap) {
-            map.emplace(Hash::existingHash(key), res);
+            map.emplace(Key::existing(key), res);
         }
 
         uint64_t depth = 0;
@@ -768,7 +768,7 @@ class Quadrable {
         GetMultiInternalMap map;
 
         for (auto &[key, res] : queryMap) {
-            map.emplace(Hash::hash(key), res);
+            map.emplace(Key::hash(key), res);
         }
 
         uint64_t depth = 0;
@@ -821,7 +821,7 @@ class Quadrable {
         std::vector<ParsedNode> nodeStack;
         bool reverse;
 
-        Iterator(Quadrable *db_, lmdb::txn &txn_, const Hash &target, bool reverse_ = false) : db(db_), txn(txn_), reverse(reverse_) {
+        Iterator(Quadrable *db_, lmdb::txn &txn_, const Key &target, bool reverse_ = false) : db(db_), txn(txn_), reverse(reverse_) {
             nodeStack.emplace_back(txn, db->dbi_node, db->getHeadNodeId(txn));
 
             bool leftBias = false;
@@ -946,14 +946,14 @@ class Quadrable {
     };
 
     using ProofGenItems = std::vector<ProofGenItem>;
-    using ProofHashes = std::map<Hash, std::string>; // keyHash -> key
+    using ProofHashes = std::map<Key, std::string>; // keyHash -> key
     using ProofReverseNodeMap = std::map<uint64_t, uint64_t>; // child -> parent
 
     Proof exportProof(lmdb::txn &txn, const std::set<std::string> &keys) {
         ProofHashes keyHashes;
 
         for (auto &key : keys) {
-            keyHashes.emplace(Hash::hash(key), key);
+            keyHashes.emplace(Key::hash(key), key);
         }
 
         return exportProofRaw(txn, keyHashes);
@@ -986,7 +986,7 @@ class Quadrable {
         ParsedNode node(txn, dbi_node, nodeId);
 
         if (node.isEmpty()) {
-            Hash h = begin->first;
+            Key h = begin->first;
             h.keepPrefixBits(depth);
 
             items.emplace_back(ProofGenItem{
@@ -1122,8 +1122,8 @@ class Quadrable {
         uint64_t depth;
         uint64_t nodeId;
         ssize_t next;
-        Hash keyHash;
-        Hash nodeHash;
+        Key keyHash;
+        Key nodeHash;
 
         bool merged = false;
     };
@@ -1157,17 +1157,17 @@ class Quadrable {
 
         for (size_t i = 0; i < proof.strands.size(); i++) {
             auto &strand = proof.strands[i];
-            auto keyHash = Hash::existingHash(strand.keyHash);
+            auto keyHash = Key::existing(strand.keyHash);
             auto next = static_cast<ssize_t>(i+1);
 
             if (strand.strandType == ProofStrand::Type::Leaf) {
                 auto info = BuiltNode::newLeaf(this, txn, keyHash, strand.val, strand.key);
                 accums.emplace_back(ImportProofItemAccum{ strand.depth, info.nodeId, next, keyHash, info.nodeHash, });
             } else if (strand.strandType == ProofStrand::Type::WitnessLeaf) {
-                auto info = BuiltNode::newWitnessLeaf(this, txn, keyHash, Hash::existingHash(strand.val));
+                auto info = BuiltNode::newWitnessLeaf(this, txn, keyHash, Key::existing(strand.val));
                 accums.emplace_back(ImportProofItemAccum{ strand.depth, info.nodeId, next, keyHash, info.nodeHash, });
             } else if (strand.strandType == ProofStrand::Type::WitnessEmpty) {
-                accums.emplace_back(ImportProofItemAccum{ strand.depth, 0, next, keyHash, Hash::nullHash(), });
+                accums.emplace_back(ImportProofItemAccum{ strand.depth, 0, next, keyHash, Key::null(), });
             } else {
                 throw quaderr("unrecognized ProofItem type: ", int(strand.strandType));
             }
@@ -1188,7 +1188,7 @@ class Quadrable {
             BuiltNode siblingInfo;
 
             if (cmd.op == ProofCmd::Op::HashProvided) {
-                siblingInfo = BuiltNode::newWitness(this, txn, Hash::existingHash(cmd.hash));
+                siblingInfo = BuiltNode::newWitness(this, txn, Key::existing(cmd.hash));
             } else if (cmd.op == ProofCmd::Op::HashEmpty) {
                 siblingInfo = BuiltNode::empty();
             } else if (cmd.op == ProofCmd::Op::Merge) {
