@@ -792,10 +792,10 @@ void doTests() {
     test("update proof", [&]{
         auto setupDb = [&]{
             db.change()
-              .put("388662362962", "A")  // 01...
-              .put("947167210798", "B")  // 1000...
-              .put("363565948405", "C")  // 101...
-              .put("287625867965", "D")  // 1001...
+              .put("353568684874", "A")  // 01...
+              .put("852771900452", "B")  // 1000...
+              .put("877307249616", "C")  // 101...
+              .put("640237942109", "D")  // 1001...
               .apply(txn);
         };
 
@@ -808,20 +808,20 @@ void doTests() {
             setupDb();
 
             proof = proofRoundtrip(db.exportProof(txn, {
-                "388662362962",
+                "353568684874",
             }));
             origRoot = db.root(txn);
 
-            db.change().put("388662362962", "A2").apply(txn);
+            db.change().put("353568684874", "A2").apply(txn);
             newRoot = db.root(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
 
-            db.change().put("388662362962", "A2").apply(txn);
+            db.change().put("353568684874", "A2").apply(txn);
 
             verify(db.root(txn) == newRoot); // also checked by equivHeads
 
-            verifyThrow(db.change().put("947167210798", "B2").apply(txn), "encountered witness during update");
+            verifyThrow(db.change().put("852771900452", "B2").apply(txn), "encountered witness during update");
         });
 
 
@@ -829,18 +829,18 @@ void doTests() {
             setupDb();
 
             proof = proofRoundtrip(db.exportProof(txn, {
-                "947167210798",
-                "363565948405",
+                "852771900452",
+                "877307249616",
             }));
             origRoot = db.root(txn);
 
-            db.change().put("947167210798", "B2").apply(txn);
-            db.change().put("363565948405", "C2").apply(txn);
+            db.change().put("852771900452", "B2").apply(txn);
+            db.change().put("877307249616", "C2").apply(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
 
-            db.change().put("947167210798", "B2").apply(txn);
-            db.change().put("363565948405", "C2").apply(txn);
+            db.change().put("852771900452", "B2").apply(txn);
+            db.change().put("877307249616", "C2").apply(txn);
         });
 
 
@@ -848,7 +848,7 @@ void doTests() {
             setupDb();
 
             proof = proofRoundtrip(db.exportProof(txn, {
-                "947167210798",
+                "852771900452",
             }));
             origRoot = db.root(txn);
 
@@ -866,20 +866,20 @@ void doTests() {
             setupDb();
 
             proof = proofRoundtrip(db.exportProof(txn, {
-                "627438066816", // 00...
+                "787934352296", // 00...
             }));
             origRoot = db.root(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
 
-            verifyThrow(db.get(txn, "388662362962", val), "incomplete tree");
+            verifyThrow(db.get(txn, "353568684874", val), "incomplete tree");
 
             auto nodeId = db.getHeadNodeId(txn);
-            db.change().put("388662362962", "A").apply(txn);
+            db.change().put("353568684874", "A").apply(txn);
 
             verify(nodeId != db.getHeadNodeId(txn)); // must use new nodes, since upgrading WitnessLeaf to Leaf
 
-            verify(db.get(txn, "388662362962", val));
+            verify(db.get(txn, "353568684874", val));
             verify(val == "A");
         });
 
@@ -889,20 +889,20 @@ void doTests() {
             setupDb();
 
             proof = proofRoundtrip(db.exportProof(txn, {
-                "627438066816", // 00...
+                "787934352296", // 00...
             }));
             origRoot = db.root(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
 
-            verifyThrow(db.get(txn, "388662362962", val), "incomplete tree");
+            verifyThrow(db.get(txn, "353568684874", val), "incomplete tree");
 
             auto nodeId = db.getHeadNodeId(txn);
-            db.change().put("388662362962", "A").apply(txn);
+            db.change().put("353568684874", "A").apply(txn);
 
             verify(nodeId != db.getHeadNodeId(txn)); // must use new nodes, since upgrading WitnessLeaf to Leaf
 
-            verify(db.get(txn, "388662362962", val));
+            verify(db.get(txn, "353568684874", val));
             verify(val == "A");
         });
 
@@ -913,15 +913,15 @@ void doTests() {
             setupDb();
 
             proof = proofRoundtrip(db.exportProof(txn, {
-                "627438066816", // 00...
+                "787934352296", // 00...
             }));
             origRoot = db.root(txn);
 
-            db.change().put("388662362962", "A2").apply(txn);
+            db.change().put("353568684874", "A2").apply(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
 
-            db.change().put("388662362962", "A2").apply(txn);
+            db.change().put("353568684874", "A2").apply(txn);
         });
 
 
@@ -930,15 +930,15 @@ void doTests() {
             setupDb();
 
             proof = proofRoundtrip(db.exportProof(txn, {
-                "627438066816", // 00...
+                "787934352296", // 00...
             }));
             origRoot = db.root(txn);
 
-            db.change().put("627438066816", "NEW").apply(txn);
+            db.change().put("787934352296", "NEW").apply(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
 
-            db.change().put("627438066816", "NEW").apply(txn);
+            db.change().put("787934352296", "NEW").apply(txn);
         });
 
 
@@ -946,19 +946,19 @@ void doTests() {
 
 
         equivHeads("can bubble up a witnessLeaf", [&]{
-            db.change().put("a", "1").put("b", "2").apply(txn);
+            db.change().put("731156037546", "1").put("925458752084", "2").apply(txn);
 
             proof = proofRoundtrip(db.exportProof(txn, {
-                "a", // 0...
-                "d", // 1...
+                "731156037546", // 0...
+                "925458752084", // 1...
             }));
             origRoot = db.root(txn);
 
-            db.change().del("a").apply(txn);
+            db.change().del("731156037546").apply(txn);
         }, [&]{
             db.importProof(txn, proof, origRoot);
 
-            db.change().del("a").apply(txn);
+            db.change().del("731156037546").apply(txn);
         });
 
 

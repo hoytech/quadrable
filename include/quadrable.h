@@ -16,9 +16,7 @@
 #include <functional>
 
 #include "lmdbxx/lmdb++.h"
-
-#include "quadrable/keccak.h"
-
+#include "blake2.h"
 
 
 
@@ -89,18 +87,44 @@ uint64_t decodeVarInt(std::string_view s) {
 
 
 
+class Hash {
+  public:
+    Hash(size_t outputSize_) : outputSize(outputSize_) {
+        blake2s_init(&s, outputSize);
+    }
+
+    void update(std::string_view sv) {
+        blake2s_update(&s, reinterpret_cast<const uint8_t*>(sv.data()), sv.length());
+    }
+
+    void update(const uint8_t *input, size_t length) {
+        blake2s_update(&s, input, length);
+    }
+
+    void final(uint8_t *output) {
+        blake2s_final(&s, output, outputSize);
+    }
+
+  private:
+    blake2s_state s;
+    size_t outputSize;
+};
+
+
 class Key {
   public:
     Key() {};
 
     static Key hash(std::string_view s) {
-        Key h;
+        Key k;
 
-        Keccak k;
-        k.add(s.data(), s.size());
-        k.getHash(h.data);
+        {
+            Hash h(sizeof(k.data));
+            h.update(s);
+            h.final(k.data);
+        }
 
-        return h;
+        return k;
     }
 
     static Key existing(std::string_view s) {
@@ -479,13 +503,13 @@ class Quadrable {
                 Key valHash = Key::hash(val);
                 unsigned char nullChar = 0;
 
-                Keccak k;
-
-                k.add(keyHash.sv());
-                k.add(valHash.sv());
-                k.add(&nullChar, 1);
-
-                k.getHash(output.nodeHash.data);
+                {
+                    Hash h(sizeof(output.nodeHash.data));
+                    h.update(keyHash.sv());
+                    h.update(valHash.sv());
+                    h.update(&nullChar, 1);
+                    h.final(output.nodeHash.data);
+                }
             }
 
             std::string nodeRaw;
@@ -518,13 +542,13 @@ class Quadrable {
             {
                 unsigned char nullChar = 0;
 
-                Keccak k;
-
-                k.add(keyHash.sv());
-                k.add(valHash.sv());
-                k.add(&nullChar, 1);
-
-                k.getHash(output.nodeHash.data);
+                {
+                    Hash h(sizeof(output.nodeHash.data));
+                    h.update(keyHash.sv());
+                    h.update(valHash.sv());
+                    h.update(&nullChar, 1);
+                    h.final(output.nodeHash.data);
+                }
             }
 
             std::string nodeRaw;
@@ -544,10 +568,10 @@ class Quadrable {
             BuiltNode output;
 
             {
-                Keccak k;
-                k.add(leftNode.nodeHash.data, sizeof(leftNode.nodeHash.data));
-                k.add(rightNode.nodeHash.data, sizeof(rightNode.nodeHash.data));
-                k.getHash(output.nodeHash.data);
+                Hash h(sizeof(output.nodeHash.data));
+                h.update(leftNode.nodeHash.data, sizeof(leftNode.nodeHash.data));
+                h.update(rightNode.nodeHash.data, sizeof(rightNode.nodeHash.data));
+                h.final(output.nodeHash.data);
             }
 
             std::string nodeRaw;

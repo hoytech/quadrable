@@ -4,7 +4,7 @@ STD      = -std=c++17
 CXXFLAGS = $(STD) $(OPT) $(W) -fPIC $(XCXXFLAGS)
 INCS     = -Iinclude -Iexternal -Iexternal/hoytech-cpp -Iexternal/docopt.cpp
 
-LDLIBS   = -llmdb -pthread
+LDLIBS   = -llmdb -lb2 -pthread
 LDFLAGS  = -flto $(XLDFLAGS)
 
 CHECK_SRCS = check.cpp
