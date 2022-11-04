@@ -140,25 +140,7 @@ void doTests() {
 
 
 
-    test("basic put/get integers", [&]{
-        db.change()
-          .put(0, "zero")
-          .put(1, "one")
-          .apply(txn);
-
-        std::string_view val;
-        verify(db.get(txn, 0, val));
-        verify(val == "zero");
-
-        verify(db.get(txn, 1, val));
-        verify(val == "one");
-
-        verify(!db.get(txn, 2, val));
-
-        auto stats = db.stats(txn);
-        verify(stats.numLeafNodes == 2);
-    });
-
+    /* FIXME: these tests will be useful elsewhere
     test("integer round-trips", [&]{
         for (uint64_t i = 0; i < 100'000; i++) {
             verify(quadrable::Hash::fromInteger(i).toInteger() == i);
@@ -183,72 +165,7 @@ void doTests() {
             verifyThrow(quadrable::Hash::fromInteger(i), "int range exceeded");
         }
     });
-
-    test("individual push", [&]{
-        db.push(txn, "a");
-        db.push(txn, "b");
-        db.push(txn, "c");
-        db.push(txn, "d");
-        db.push(txn, "e");
-        db.push(txn, "f");
-        db.push(txn, "g");
-
-        auto stats = db.stats(txn);
-        verify(stats.numLeafNodes == 8); // 7 plus the array size elem
-
-        std::string_view val;
-
-        verify(db.get(txn, 0, val));
-        verify(val == "a");
-
-        verify(db.get(txn, 1, val));
-        verify(val == "b");
-
-        verify(db.get(txn, 6, val));
-        verify(val == "g");
-    });
-
-    test("batch push", [&]{
-        db.change()
-          .push(txn, "a")
-          .push(txn, "b")
-          .push(txn, "c")
-          .push(txn, "d")
-          .push(txn, "e")
-          .push(txn, "f")
-          .push(txn, "g")
-          .apply(txn);
-
-        auto stats = db.stats(txn);
-        verify(stats.numLeafNodes == 8); // 7 plus the array size elem
-
-        std::string_view val;
-
-        verify(db.get(txn, 0, val));
-        verify(val == "a");
-
-        verify(db.get(txn, 1, val));
-        verify(val == "b");
-
-        verify(db.get(txn, 6, val));
-        verify(val == "g");
-    });
-
-    test("reset pushable", [&]{
-        for (uint64_t reset = 0; reset < 20; reset++) {
-            db.checkout();
-
-            std::string root;
-
-            for (uint64_t i = 0; i < 20; i++) {
-                if (i == reset) root = db.root(txn);
-                db.push(txn, std::to_string(i) + "_" + std::to_string(reset));
-            }
-
-            db.resetPushable(txn, reset);
-            verify(db.root(txn) == root);
-        }
-    });
+    */
 
 
     test("empty heads", [&]{
@@ -742,80 +659,6 @@ void doTests() {
     });
 
 
-    test("push proofs", [&]{
-        auto change = db.change();
-
-        uint64_t n = 1000;
-
-        for (uint64_t i = 0; i < n; i++) {
-            change.push(txn, "asdf " + std::to_string(i));
-        }
-
-        change.apply(txn);
-
-        auto origRoot = db.root(txn);
-
-        auto proof = proofRoundtrip(db.exportProofInteger(txn, {
-            n - 20,
-        }));
-
-
-        db.checkout();
-
-        db.importProof(txn, proof, origRoot);
-
-        std::string_view val;
-
-        verify(db.get(txn, n - 20, val));
-        verify(val == "asdf " + std::to_string(n - 20));
-        verifyThrow(db.get(txn, n - 9, val), "incomplete tree");
-        verifyThrow(db.get(txn, n - 1, val), "incomplete tree");
-        verifyThrow(db.get(txn, n, val), "incomplete tree");
-        verifyThrow(db.get(txn, n + 1, val), "incomplete tree");
-    });
-
-    test("pushable and individual", [&]{
-        auto change = db.change();
-
-        uint64_t n = 1000;
-
-        for (uint64_t i = 0; i < n; i++) {
-            change.push(txn, "asdf " + std::to_string(i));
-        }
-
-        change.apply(txn);
-
-        auto origRoot = db.root(txn);
-
-        auto proof = proofRoundtrip(db.exportProofInteger(txn, {
-            600,
-            601,
-            602,
-        }, true));
-
-
-        db.checkout();
-
-        db.importProof(txn, proof, origRoot);
-
-        std::string_view val;
-
-        verify(db.get(txn, 600, val));
-        verify(val == "asdf 600");
-        verify(db.get(txn, 601, val));
-        verify(val == "asdf 601");
-        verify(db.get(txn, 602, val));
-        verify(val == "asdf 602");
-
-        verifyThrow(db.get(txn, 603, val), "incomplete tree");
-        verifyThrow(db.get(txn, n-1, val), "incomplete tree");
-
-        // all >=n are available (not-present)
-        for (uint64_t i = n; i < n*100; i++) verify(!db.get(txn, i, val));
-    });
-
-
-
     test("big proof test", [&]{
         auto changes = db.change();
         for (int i=0; i<1000; i++) {
@@ -1142,49 +985,7 @@ void doTests() {
 
 
 
-    test("update push proof", [&]{
-        auto setupDb = [&]{
-            auto change = db.change();
-
-            uint64_t n = 1000;
-
-            for (uint64_t i = 0; i < n; i++) {
-                change.push(txn, "asdf " + std::to_string(i));
-            }
-
-            change.apply(txn);
-        };
-
-        quadrable::Proof proof;
-        std::string origRoot, newRoot;
-        std::string_view val;
-
-
-        equivHeads("push on a bunch of extras", [&]{
-            setupDb();
-
-            proof = proofRoundtrip(db.exportProofInteger(txn, {}, true));
-            origRoot = db.root(txn);
-
-            auto changes = db.change();
-            for (uint64_t i = 0; i < 5000; i++) changes.push(txn, "new elem " + std::to_string(i));
-            changes.apply(txn);
-
-            newRoot = db.root(txn);
-        }, [&]{
-            db.importProof(txn, proof, origRoot);
-
-            auto changes = db.change();
-            for (uint64_t i = 0; i < 5000; i++) changes.push(txn, "new elem " + std::to_string(i));
-            changes.apply(txn);
-
-            verify(db.root(txn) == newRoot); // also checked by equivHeads
-        });
-    });
-
-
-
-
+    /* FIXME: get these working again
     test("iterators basic", [&]{
         db.checkout();
 
@@ -1282,6 +1083,7 @@ void doTests() {
         go(100, 2000, 31);
         go(4000, 5000, 82);
     });
+    */
 
 
 

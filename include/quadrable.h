@@ -103,73 +103,6 @@ class Hash {
         return h;
     }
 
-    static Hash fromInteger(uint64_t n) {
-        if (n > std::numeric_limits<uint64_t>::max() - 2) throw quaderr("int range exceeded");
-
-        uint64_t bits = 63 - __builtin_clzll(n + 2);
-
-        uint64_t offset = (1ULL << bits) - 2;
-        auto b = std::bitset<128>(bits - 1) << (128 - 6);
-        b |= (std::bitset<128>(n - offset) << (128 - 6 - bits));
-
-        uint64_t w1 = (b >> 64).to_ullong();
-        uint64_t w2 = ((b << 64) >> 64).to_ullong();
-
-        Hash h = nullHash();
-
-        h.data[0] = (w1 >> (64 - 8)) & 0xFF;
-        h.data[1] = (w1 >> (64 - 8*2)) & 0xFF;
-        h.data[2] = (w1 >> (64 - 8*3)) & 0xFF;
-        h.data[3] = (w1 >> (64 - 8*4)) & 0xFF;
-        h.data[4] = (w1 >> (64 - 8*5)) & 0xFF;
-        h.data[5] = (w1 >> (64 - 8*6)) & 0xFF;
-        h.data[6] = (w1 >> (64 - 8*7)) & 0xFF;
-        h.data[7] = (w1 >> (64 - 8*8)) & 0xFF;
-        h.data[8] = (w2 >> (64 - 8)) & 0xFF;
-
-        return h;
-    }
-
-    uint64_t toInteger() {
-        if (std::any_of(data + 16, data + sizeof(data), [](uint8_t c){ return c != 0; })) throw quaderr("hash is not in integer format");
-
-        uint64_t w1, w2;
-
-        w1 = data[0];
-        w1 = (w1 << 8) | data[1];
-        w1 = (w1 << 8) | data[2];
-        w1 = (w1 << 8) | data[3];
-        w1 = (w1 << 8) | data[4];
-        w1 = (w1 << 8) | data[5];
-        w1 = (w1 << 8) | data[6];
-        w1 = (w1 << 8) | data[7];
-
-        w2 = data[8];
-        w2 = (w2 << 8) | data[9];
-        w2 <<= 8*6;
-
-        uint64_t bits = w1 >> (64 - 6);
-
-        auto b = (std::bitset<128>(w1) << 64) | std::bitset<128>(w2);
-        b <<= 6;
-        b >>= 128 - bits - 1;
-
-        uint64_t n = b.to_ullong();
-
-        uint64_t offset = (1ULL << (bits + 1)) - 2;
-
-        return n + offset;
-    }
-
-    static Hash nextPushable() {
-        Hash h;
-
-        memset(h.data, '\0', sizeof(h.data));
-        h.data[0] = '\xFC';
-
-        return h;
-    }
-
     static Hash existingHash(std::string_view s) {
         Hash h;
 
@@ -479,42 +412,14 @@ class Quadrable {
             return *this;
         }
 
-        UpdateSet &put(uint64_t keyRaw, std::string_view val) {
-            map.insert_or_assign(Hash::fromInteger(keyRaw), Update{"", std::string(val), false});
-            return *this;
-        }
-
         UpdateSet &put(const Hash &key, std::string_view val) {
             map.insert_or_assign(key, Update{"", std::string(val), false});
-            return *this;
-        }
-
-        UpdateSet &push(lmdb::txn &txn, std::string_view val) {
-            auto nextPushable = Hash::nextPushable();
-
-            uint64_t index = 0;
-            std::string_view indexSv;
-
-            if (map.find(nextPushable) != map.end()) {
-                index = decodeVarInt(map[nextPushable].val);
-            } else if (db->getRaw(txn, nextPushable.sv(), indexSv)) {
-                index = decodeVarInt(indexSv);
-            }
-
-            map.insert_or_assign(nextPushable, Update{"", encodeVarInt(index + 1), false});
-            map.insert_or_assign(Hash::fromInteger(index), Update{"", std::string(val), false});
-
             return *this;
         }
 
         UpdateSet &del(std::string_view keyRaw) {
             if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
             map.insert_or_assign(Hash::hash(keyRaw), Update{std::string(keyRaw), "", true});
-            return *this;
-        }
-
-        UpdateSet &del(uint64_t keyRaw) {
-            map.insert_or_assign(Hash::fromInteger(keyRaw), Update{"", "", true});
             return *this;
         }
 
@@ -710,19 +615,7 @@ class Quadrable {
         change().put(key, val).apply(txn);
     }
 
-    void put(lmdb::txn &txn, uint64_t key, std::string_view val) {
-        change().put(key, val).apply(txn);
-    }
-
-    void push(lmdb::txn &txn, std::string_view val) {
-        change().push(txn, val).apply(txn);
-    }
-
     void del(lmdb::txn &txn, std::string_view key) {
-        change().del(key).apply(txn);
-    }
-
-    void del(lmdb::txn &txn, uint64_t key) {
         change().del(key).apply(txn);
     }
 
@@ -734,40 +627,6 @@ class Quadrable {
     void setLeafKey(lmdb::txn &txn, uint64_t nodeId, std::string_view leafKey) {
         if (!trackKeys || leafKey.size() == 0) return;
         dbi_key.put(txn, lmdb::to_sv<uint64_t>(nodeId), leafKey);
-    }
-
-    void resetPushable(lmdb::txn &txn, uint64_t index) {
-        if (index == 0) {
-            setHeadNodeId(txn, 0);
-            return;
-        }
-
-        uint64_t oldNodeId = getHeadNodeId(txn);
-        uint64_t newNodeId;
-
-        // Delete all nodes to the right of the index (include next pushable index)
-
-        {
-            UpdateSet updates(this);
-            updates.put(index - 1, "");
-
-            bool bubbleUp = false;
-            auto newNode = putAux(txn, 0, oldNodeId, updates, updates.map.begin(), updates.map.end(), bubbleUp, true);
-            newNodeId = newNode.nodeId;
-        }
-
-        // Insert new next pushable index
-
-        {
-            UpdateSet updates(this);
-            updates.put(Hash::nextPushable(), encodeVarInt(index));
-
-            bool bubbleUp = false;
-            auto newNode = putAux(txn, 0, newNodeId, updates, updates.map.begin(), updates.map.end(), bubbleUp, false);
-            newNodeId = newNode.nodeId;
-        }
-
-        if (newNodeId != oldNodeId) setHeadNodeId(txn, newNodeId);
     }
 
     BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp, bool deleteRightSide) {
@@ -910,19 +769,6 @@ class Quadrable {
 
         for (auto &[key, res] : queryMap) {
             map.emplace(Hash::hash(key), res);
-        }
-
-        uint64_t depth = 0;
-        auto nodeId = getHeadNodeId(txn);
-
-        getMultiAux(txn, depth, nodeId, map.begin(), map.end());
-    }
-
-    void getMultiInteger(lmdb::txn &txn, GetMultiIntegerQuery &queryMap) {
-        GetMultiInternalMap map;
-
-        for (auto &[key, res] : queryMap) {
-            map.emplace(Hash::fromInteger(key), res);
         }
 
         uint64_t depth = 0;
@@ -1079,21 +925,6 @@ class Quadrable {
         return false;
     }
 
-    bool get(lmdb::txn &txn, uint64_t key, std::string_view &val) {
-        GetMultiIntegerQuery query;
-
-        auto rec = query.emplace(key, GetMultiResult{});
-
-        getMultiInteger(txn, query);
-
-        if (rec.first->second.exists) {
-            val = rec.first->second.val;
-            return true;
-        }
-
-        return false;
-    }
-
     GetMultiQuery get(lmdb::txn &txn, std::set<std::string> keys) {
         GetMultiQuery query;
 
@@ -1105,33 +936,6 @@ class Quadrable {
 
         return query;
     }
-
-    GetMultiIntegerQuery get(lmdb::txn &txn, std::set<uint64_t> keys) {
-        GetMultiIntegerQuery query;
-
-        for (auto &key : keys) {
-            query.emplace(key, GetMultiResult{});
-        }
-
-        getMultiInteger(txn, query);
-
-        return query;
-    }
-
-    uint64_t length(lmdb::txn &txn) {
-        auto nextPushable = Hash::nextPushable();
-
-        uint64_t index = 0;
-        std::string_view indexSv;
-
-        if (getRaw(txn, nextPushable.sv(), indexSv)) {
-            index = decodeVarInt(indexSv);
-        }
-
-        return index;
-    }
-
-
 
 
 
@@ -1150,29 +954,6 @@ class Quadrable {
 
         for (auto &key : keys) {
             keyHashes.emplace(Hash::hash(key), key);
-        }
-
-        return exportProofRaw(txn, keyHashes);
-    }
-
-    Proof exportProofInteger(lmdb::txn &txn, const std::set<uint64_t> &keys = {}, bool pushable = false) {
-        ProofHashes keyHashes;
-
-        for (auto &key : keys) {
-            keyHashes.emplace(Hash::fromInteger(key), "");
-        }
-
-        if (pushable) {
-            auto nextPushable = Hash::nextPushable();
-            uint64_t index = 0;
-            std::string_view indexSv;
-
-            if (getRaw(txn, nextPushable.sv(), indexSv)) {
-                index = decodeVarInt(indexSv);
-            }
-
-            keyHashes.emplace(Hash::nextPushable(), "");
-            keyHashes.emplace(Hash::fromInteger(index), "");
         }
 
         return exportProofRaw(txn, keyHashes);
@@ -1467,9 +1248,6 @@ class Quadrable {
             return BuiltNode::reuse(origNode);
         }
     }
-
-
-
 
 
 
