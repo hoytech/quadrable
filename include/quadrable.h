@@ -144,6 +144,61 @@ class Key {
         return h;
     }
 
+    static Key fromInteger(uint64_t n) {
+        if (n > std::numeric_limits<uint64_t>::max() - 2) throw quaderr("int range exceeded");
+
+        uint64_t bits = 63 - __builtin_clzll(n + 2);
+
+        uint64_t offset = (1ULL << bits) - 2;
+        auto b = std::bitset<128>(bits - 1) << (128 - 6);
+        b |= (std::bitset<128>(n - offset) << (128 - 6 - bits));
+
+        uint64_t w1 = (b >> 64).to_ullong();
+        uint64_t w2 = ((b << 64) >> 64).to_ullong();
+
+        Key h = null();
+
+        h.data[0] = (w1 >> (64 - 8)) & 0xFF;
+        h.data[1] = (w1 >> (64 - 8*2)) & 0xFF;
+        h.data[2] = (w1 >> (64 - 8*3)) & 0xFF;
+        h.data[3] = (w1 >> (64 - 8*4)) & 0xFF;
+        h.data[4] = (w1 >> (64 - 8*5)) & 0xFF;
+        h.data[5] = (w1 >> (64 - 8*6)) & 0xFF;
+        h.data[6] = (w1 >> (64 - 8*7)) & 0xFF;
+        h.data[7] = (w1 >> (64 - 8*8)) & 0xFF;
+        h.data[8] = (w2 >> (64 - 8)) & 0xFF;
+
+        return h;
+    }
+
+    uint64_t toInteger() {
+        if (std::any_of(data + 16, data + sizeof(data), [](uint8_t c){ return c != 0; })) throw quaderr("hash is not in integer format");
+
+        uint64_t w1, w2;
+
+        w1 = data[0];
+        w1 = (w1 << 8) | data[1];
+        w1 = (w1 << 8) | data[2];
+        w1 = (w1 << 8) | data[3];
+        w1 = (w1 << 8) | data[4];
+        w1 = (w1 << 8) | data[5];
+        w1 = (w1 << 8) | data[6];
+        w1 = (w1 << 8) | data[7];
+        w2 = static_cast<uint64_t>(data[8]) << (8 * 7);
+
+        uint64_t bits = w1 >> (64 - 6);
+
+        auto b = (std::bitset<128>(w1) << 64) | std::bitset<128>(w2);
+        b <<= 6;
+        b >>= 128 - bits - 1;
+
+        uint64_t n = b.to_ullong();
+
+        uint64_t offset = (1ULL << (bits + 1)) - 2;
+
+        return n + offset;
+    }
+
     std::string str() const {
         return std::string(reinterpret_cast<const char*>(data), sizeof(data));
     }

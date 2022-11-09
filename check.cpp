@@ -140,32 +140,30 @@ void doTests() {
 
 
 
-    /* FIXME: these tests will be useful elsewhere
     test("integer round-trips", [&]{
         for (uint64_t i = 0; i < 100'000; i++) {
-            verify(quadrable::Hash::fromInteger(i).toInteger() == i);
+            verify(quadrable::Key::fromInteger(i).toInteger() == i);
         }
 
         for (uint64_t i = std::numeric_limits<uint64_t>::max() - 100'000; i <= std::numeric_limits<uint64_t>::max() - 2; i++) {
-            verify(quadrable::Hash::fromInteger(i).toInteger() == i);
+            verify(quadrable::Key::fromInteger(i).toInteger() == i);
         }
 
         for (uint64_t i = 10; i <= 64; i++) {
             uint64_t n = (1LL << i) - 5;
-            verify(quadrable::Hash::fromInteger(n).toInteger() == n);
+            verify(quadrable::Key::fromInteger(n).toInteger() == n);
         }
 
         {
             uint64_t i = std::numeric_limits<uint64_t>::max() - 1;
-            verifyThrow(quadrable::Hash::fromInteger(i), "int range exceeded");
+            verifyThrow(quadrable::Key::fromInteger(i), "int range exceeded");
         }
 
         {
             uint64_t i = std::numeric_limits<uint64_t>::max();
-            verifyThrow(quadrable::Hash::fromInteger(i), "int range exceeded");
+            verifyThrow(quadrable::Key::fromInteger(i), "int range exceeded");
         }
     });
-    */
 
 
     test("empty heads", [&]{
@@ -985,54 +983,52 @@ void doTests() {
 
 
 
-    /* FIXME: get these working again
     test("iterators basic", [&]{
         db.checkout();
 
         auto c = db.change();
         for (uint64_t i = 2; i < 20; i+=2) {
-            c.put(i, std::to_string(i));
+            c.put(quadrable::Key::fromInteger(i), std::to_string(i));
         }
         c.apply(txn);
 
         // Initial values
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(1));
+            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(1));
             verify(it.get().leafVal() == "2");
         }
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(19), true);
+            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(19), true);
             verify(it.get().leafVal() == "18");
         }
 
         // Past end values
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(19));
+            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(19));
             verify(it.get().nodeId == 0);
         }
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(1), true);
+            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(1), true);
             verify(it.get().nodeId == 0);
         }
 
         // Correct seeking behaviour
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(11));
+            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(11));
             verify(it.get().leafVal() == "12");
         }
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(11), true);
+            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(11), true);
             verify(it.get().leafVal() == "10");
         }
 
     });
-
 
     test("iterators full", [&]{
         auto go = [&](uint64_t start, uint64_t end, uint64_t skip){
@@ -1043,14 +1039,14 @@ void doTests() {
 
             auto c = db.change();
             for (uint64_t i = start; i < end; i += skip) {
-                c.put(i, std::to_string(i));
+                c.put(quadrable::Key::fromInteger(i), std::to_string(i));
                 vals[i] = std::to_string(i);
             }
             c.apply(txn);
 
             for (uint64_t i = start - 5; i < end + 5; i++) {
                 auto valsIt = vals.lower_bound(i);
-                Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(i));
+                Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(i));
 
                 while (!it.atEnd()) {
                     verify(valsIt != vals.end());
@@ -1065,7 +1061,7 @@ void doTests() {
             for (uint64_t i = end + 5; i > start - 5; i--) {
                 auto valsItFwd = vals.upper_bound(i);
                 std::reverse_iterator<decltype(valsItFwd)> valsIt{valsItFwd};
-                Quadrable::Iterator it(&db, txn, quadrable::Hash::fromInteger(i), true);
+                Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(i), true);
 
                 while (!it.atEnd()) {
                     verify(valsIt != vals.rend());
@@ -1083,7 +1079,6 @@ void doTests() {
         go(100, 2000, 31);
         go(4000, 5000, 82);
     });
-    */
 
 
 
