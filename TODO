@@ -1,7 +1,5 @@
 next
-  ensure pushable can be implemented without a "length" key
-    - prove biggest element exists (maybe prove 2**64-1 doesn't exist)
-  interface for making "sequenced hashes" where first 9 bytes are timestamp, remaining truncated hash
+  "sequenced hashes" where first 9 bytes are timestamp, remaining truncated hash
   proof for a range of values
   merge two trees (CRDT)
     - network protocol for smallest proof exchange to do this with remote tree

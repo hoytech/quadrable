@@ -2,7 +2,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <functional>
-#include <set>
+#include <vector>
 #include <bitset>
 
 #include "quadrable.h"
@@ -667,9 +667,9 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        std::set<std::string> keys;
+        std::vector<std::string> keys;
         for (int i=-500; i<500; i++) {
-            keys.insert(std::to_string(i));
+            keys.emplace_back(std::to_string(i));
         }
 
         auto proof = proofRoundtrip(db.exportProof(txn, keys));
@@ -710,9 +710,9 @@ void doTests() {
         quadrable::Proof proof, proof2;
 
         {
-            std::set<std::string> keys;
+            std::vector<std::string> keys;
             for (int i=-50; i<50; i++) {
-                keys.insert(std::to_string(i));
+                keys.emplace_back(std::to_string(i));
             }
 
             proof = proofRoundtrip(db.exportProof(txn, keys));
@@ -725,9 +725,9 @@ void doTests() {
         verify(val == "33val");
 
         {
-            std::set<std::string> keys;
+            std::vector<std::string> keys;
             for (int i=-10; i<10; i++) {
-                keys.insert(std::to_string(i));
+                keys.emplace_back(std::to_string(i));
             }
 
             proof2 = proofRoundtrip(db.exportProof(txn, keys));
@@ -977,9 +977,44 @@ void doTests() {
             //db.change().del("a").apply(txn);
             verifyThrow(db.change().del("a").apply(txn), "can't bubble a witness node");
         });
-
-
     });
+
+
+
+
+    test("integer proofs", [&]{
+        for (uint64_t skip = 1; skip < 20; skip++) {
+            db.checkout();
+
+            uint64_t last;
+
+            {
+                auto c = db.change();
+                for (uint64_t i = 1; i < 10000; i += skip) {
+                    c.put(quadrable::Key::fromInteger(i), std::to_string(i));
+                    last = i;
+                }
+                c.apply(txn);
+            }
+
+            auto origRoot = db.root(txn);
+
+            auto proof = proofRoundtrip(db.exportProofRaw(txn, {
+                db.iterate(txn, quadrable::Key::max(), true).get().key(),
+            }));
+
+            db.checkout();
+
+            db.importProof(txn, proof, origRoot);
+
+            {
+                auto c = db.change();
+                c.put(quadrable::Key::fromInteger(last + 1), std::to_string(last + 1));
+                c.apply(txn);
+            }
+        }
+    });
+
 
 
 
@@ -995,36 +1030,36 @@ void doTests() {
         // Initial values
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(1));
+            auto it = db.iterate(txn, quadrable::Key::fromInteger(1));
             verify(it.get().leafVal() == "2");
         }
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(19), true);
+            auto it = db.iterate(txn, quadrable::Key::fromInteger(19), true);
             verify(it.get().leafVal() == "18");
         }
 
         // Past end values
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(19));
+            auto it = db.iterate(txn, quadrable::Key::fromInteger(19));
             verify(it.get().nodeId == 0);
         }
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(1), true);
+            auto it = db.iterate(txn, quadrable::Key::fromInteger(1), true);
             verify(it.get().nodeId == 0);
         }
 
         // Correct seeking behaviour
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(11));
+            auto it = db.iterate(txn, quadrable::Key::fromInteger(11));
             verify(it.get().leafVal() == "12");
         }
 
         {
-            Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(11), true);
+            auto it = db.iterate(txn, quadrable::Key::fromInteger(11), true);
             verify(it.get().leafVal() == "10");
         }
 
@@ -1046,7 +1081,7 @@ void doTests() {
 
             for (uint64_t i = start - 5; i < end + 5; i++) {
                 auto valsIt = vals.lower_bound(i);
-                Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(i));
+                auto it = db.iterate(txn, quadrable::Key::fromInteger(i));
 
                 while (!it.atEnd()) {
                     verify(valsIt != vals.end());
@@ -1061,7 +1096,7 @@ void doTests() {
             for (uint64_t i = end + 5; i > start - 5; i--) {
                 auto valsItFwd = vals.upper_bound(i);
                 std::reverse_iterator<decltype(valsItFwd)> valsIt{valsItFwd};
-                Quadrable::Iterator it(&db, txn, quadrable::Key::fromInteger(i), true);
+                auto it = db.iterate(txn, quadrable::Key::fromInteger(i), true);
 
                 while (!it.atEnd()) {
                     verify(valsIt != vals.rend());

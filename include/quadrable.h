@@ -144,6 +144,14 @@ class Key {
         return h;
     }
 
+    static Key max() {
+        Key h;
+
+        memset(h.data, '\xFF', sizeof(h.data));
+
+        return h;
+    }
+
     static Key fromInteger(uint64_t n) {
         if (n > std::numeric_limits<uint64_t>::max() - 2) throw quaderr("int range exceeded");
 
@@ -366,6 +374,10 @@ class ParsedNode {
     std::string_view leafKeyHash() {
         if (!isLeaf()) throw quaderr("node is not a Leaf/WitnessLeaf");
         return raw.substr(8 + 32, 32);
+    }
+
+    Key key() {
+        return Key::existing(leafKeyHash());
     }
 
     std::string_view leafVal() {
@@ -971,6 +983,10 @@ class Quadrable {
         }
     };
 
+    Iterator iterate(lmdb::txn &txn, const Key &target, bool reverse = false) {
+        return Iterator(this, txn, target, reverse);
+    }
+
 
 
 
@@ -1028,17 +1044,27 @@ class Quadrable {
     using ProofHashes = std::map<Key, std::string>; // keyHash -> key
     using ProofReverseNodeMap = std::map<uint64_t, uint64_t>; // child -> parent
 
-    Proof exportProof(lmdb::txn &txn, const std::set<std::string> &keys) {
+    Proof exportProof(lmdb::txn &txn, const std::vector<std::string> &keys) {
         ProofHashes keyHashes;
 
         for (auto &key : keys) {
             keyHashes.emplace(Key::hash(key), key);
         }
 
-        return exportProofRaw(txn, keyHashes);
+        return exportProofAux(txn, keyHashes);
     }
 
-    Proof exportProofRaw(lmdb::txn &txn, ProofHashes &keyHashes) {
+    Proof exportProofRaw(lmdb::txn &txn, const std::vector<Key> &keys) {
+        ProofHashes keyHashes;
+
+        for (auto &key : keys) {
+            keyHashes.emplace(key, "");
+        }
+
+        return exportProofAux(txn, keyHashes);
+    }
+
+    Proof exportProofAux(lmdb::txn &txn, ProofHashes &keyHashes) {
         auto headNodeId = getHeadNodeId(txn);
 
         ProofGenItems items;
