@@ -999,6 +999,8 @@ void doTests() {
 
             auto origRoot = db.root(txn);
 
+            // Prove presence of max element
+
             auto proof = proofRoundtrip(db.exportProofRaw(txn, {
                 db.iterate(txn, quadrable::Key::max(), true).get().key(),
             }));
@@ -1015,6 +1017,30 @@ void doTests() {
         }
     });
 
+
+
+    // This test shows that the size of the proof doesn't increase drastically if larger numbers are
+    // used for integer keys. Even though there are more common prefix bits, most of their siblings will
+    // be empty, which has a very compact proof encoding.
+
+    test("proof sizing", [&]{
+        for (uint64_t i = 1; i <= 1e12; i *= 10) {
+            db.checkout();
+
+            {
+                auto c = db.change();
+                c.put(quadrable::Key::fromInteger(i), "A");
+                c.apply(txn);
+            }
+
+            auto proof = quadrable::proofTransport::encodeProof(db.exportProofRaw(txn, {
+                quadrable::Key::fromInteger(i),
+            }));
+
+            //std::cout << "SIZE " << i << " -> " << proof.length() << std::endl;
+            verify(proof.length() <= 13);
+        }
+    });
 
 
 
