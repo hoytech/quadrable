@@ -44,7 +44,7 @@ std::runtime_error quaderr(const T&... value) {
 
 
 
-std::string encodeVarInt(uint64_t n) {
+inline std::string encodeVarInt(uint64_t n) {
     if (n == 0) return std::string(1, '\0');
 
     std::string o;
@@ -63,7 +63,7 @@ std::string encodeVarInt(uint64_t n) {
     return o;
 }
 
-uint64_t decodeVarInt(std::function<unsigned char()> getByte) {
+inline uint64_t decodeVarInt(std::function<unsigned char()> getByte) {
     uint64_t res = 0;
 
     while (1) {
@@ -75,7 +75,7 @@ uint64_t decodeVarInt(std::function<unsigned char()> getByte) {
     return res;
 }
 
-uint64_t decodeVarInt(std::string_view s) {
+inline uint64_t decodeVarInt(std::string_view s) {
     size_t next = 0;
 
     return decodeVarInt([&]{
@@ -401,10 +401,6 @@ class ParsedNode {
 
 
 
-
-static inline void checkDepth(uint64_t depth) {
-    assert(depth <= 255); // should only happen on keccak256 collision (or a bug)
-}
 
 
 
@@ -802,7 +798,7 @@ class Quadrable {
 
         // Recurse
 
-        checkDepth(depth);
+        assertDepth(depth);
 
         auto leftNode = putAux(txn, depth+1, node.leftNodeId, updates, begin, middle, checkBubble, deleteRightSide);
         auto rightNode = [&]{
@@ -893,7 +889,7 @@ class Quadrable {
             auto middle = begin;
             while (middle != end && !middle->first.getBit(depth)) ++middle;
 
-            checkDepth(depth);
+            assertDepth(depth);
 
             getMultiAux(txn, depth+1, node.leftNodeId, begin, middle);
             getMultiAux(txn, depth+1, node.rightNodeId, middle, end);
@@ -1124,7 +1120,7 @@ class Quadrable {
             auto middle = begin;
             while (middle != end && !middle->first.getBit(depth)) ++middle;
 
-            checkDepth(depth);
+            assertDepth(depth);
 
             if (node.leftNodeId) reverseMap.emplace(node.leftNodeId, nodeId);
             if (node.rightNodeId) reverseMap.emplace(node.rightNodeId, nodeId);
@@ -1374,7 +1370,7 @@ class Quadrable {
         if (!cb(node, depth)) return;
 
         if (node.isBranch()) {
-            checkDepth(depth);
+            assertDepth(depth);
 
             walkTreeAux(txn, cb, node.leftNodeId, depth+1);
             walkTreeAux(txn, cb, node.rightNodeId, depth+1);
@@ -1605,6 +1601,11 @@ class Quadrable {
         dbi_node.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);
         return newNodeId;
     }
+
+    void assertDepth(uint64_t depth) {
+        assert(depth <= 255); // should only happen on hash collision (or a bug)
+    }
+
 
 
 
