@@ -12,8 +12,8 @@
 #include <docopt.h>
 
 #include "quadrable.h"
-#include "quadrable/utils.h"
-#include "quadrable/proof.h"
+#include "quadrable/proofTransport.h"
+#include "quadrable/debug.h"
 
 
 using quadrable::quaderr;
@@ -377,10 +377,10 @@ void run(int argc, char **argv) {
             }
         }
 
-        std::set<std::string> keys;
+        std::vector<std::string> keys;
 
         for (auto &key : keysOrig) {
-            keys.insert(key);
+            keys.push_back(key);
         }
 
         proof = db.exportProof(txn, keys);

@@ -6,8 +6,8 @@
 #include <bitset>
 
 #include "quadrable.h"
-#include "quadrable/utils.h"
-#include "quadrable/proof.h"
+#include "quadrable/proofTransport.h"
+#include "quadrable/debug.h"
 
 
 

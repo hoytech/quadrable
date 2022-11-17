@@ -1,6 +1,7 @@
 #pragma once
 
-#include "quadrable.h"
+#include "quadrable/utils.h"
+#include "quadrable/varint.h"
 
 
 
@@ -14,7 +15,7 @@ enum class EncodingType {
 };
 
 
-static inline std::string encodeProof(const Proof &p, EncodingType encodingType = EncodingType::HashedKeys) {
+inline std::string encodeProof(const Proof &p, EncodingType encodingType = EncodingType::HashedKeys) {
     std::string o;
 
     // Encoding type
@@ -134,7 +135,7 @@ static inline std::string encodeProof(const Proof &p, EncodingType encodingType 
 }
 
 
-static inline Proof decodeProof(std::string_view encoded) {
+inline Proof decodeProof(std::string_view encoded) {
     Proof proof;
 
     auto getByte = [&](){
