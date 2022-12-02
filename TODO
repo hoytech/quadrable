@@ -3,6 +3,10 @@ next
   proof for a range of values
   merge two trees (CRDT)
     - network protocol for smallest proof exchange to do this with remote tree
+  sync
+  flatmaps
+  put leaf values in their own DB to reduce fragmentation caused by interior nodes
+  in-memory backing store
 
 lib
   ! tests for diff and mergeProof
