@@ -991,6 +991,7 @@ void doTests() {
             {
                 auto c = db.change();
                 for (uint64_t i = 1; i < 10000; i += skip) {
+                    verify(quadrable::Key::fromInteger(i - 1) < quadrable::Key::fromInteger(i));
                     c.put(quadrable::Key::fromInteger(i), std::to_string(i));
                     last = i;
                 }
