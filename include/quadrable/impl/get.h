@@ -102,7 +102,7 @@ void getMultiAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, GetMultiIntern
 
         getMultiAux(txn, depth+1, node.leftNodeId, begin, middle);
         getMultiAux(txn, depth+1, node.rightNodeId, middle, end);
-    } else if (node.isWitness()) {
+    } else if (node.isWitnessAny()) {
         throw quaderr("encountered witness node: incomplete tree");
     } else {
         throw quaderr("unrecognized nodeType: ", int(node.nodeType));

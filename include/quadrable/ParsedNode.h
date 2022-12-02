@@ -56,7 +56,9 @@ class ParsedNode {
     bool isEmpty() { return nodeType == NodeType::Empty; }
     bool isLeaf() { return nodeType == NodeType::Leaf || nodeType == NodeType::WitnessLeaf; }
     bool isBranch() { return nodeType == NodeType::BranchLeft || nodeType == NodeType::BranchRight || nodeType == NodeType::BranchBoth; }
-    bool isWitness() { return nodeType == NodeType::Witness || nodeType == NodeType::WitnessLeaf; }
+    bool isWitness() { return nodeType == NodeType::Witness; }
+    bool isWitnessLeaf() { return nodeType == NodeType::WitnessLeaf; }
+    bool isWitnessAny() { return nodeType == NodeType::Witness || nodeType == NodeType::WitnessLeaf; }
 
     std::string_view nodeHash() {
         static const char nullBytes[32] = {};

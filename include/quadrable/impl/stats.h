@@ -22,7 +22,7 @@ Stats stats(lmdb::txn &txn) {
             output.numLeafNodes++;
         } else if (node.isBranch()) {
             output.numBranchNodes++;
-        } else if (node.isWitness()) {
+        } else if (node.isWitnessAny()) {
             output.numWitnessNodes++;
         }
 

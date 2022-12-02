@@ -299,7 +299,7 @@ BuiltNode mergeProofInternal(lmdb::txn &txn, uint64_t origNodeId, uint64_t newNo
     ParsedNode origNode(txn, dbi_node, origNodeId);
     ParsedNode newNode(txn, dbi_node, newNodeId);
 
-    if ((origNode.isWitness() && !newNode.isWitness()) ||
+    if ((origNode.isWitnessAny() && !newNode.isWitnessAny()) ||
         (origNode.nodeType == NodeType::Witness && newNode.nodeType == NodeType::WitnessLeaf)) {
 
         // FIXME: if keys are available on one of them
