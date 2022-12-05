@@ -1143,14 +1143,51 @@ void doTests() {
     });
 
 
+    test("range proofs", [&]{
+        uint64_t skip = 1;
+
+        db.checkout();
+
+        {
+            auto c = db.change();
+            for (uint64_t i = 1; i < 10000; i += skip) {
+                c.put(quadrable::Key::fromInteger(i), std::to_string(i));
+            }
+            c.apply(txn);
+        }
+
+        auto origRoot = db.root(txn);
+
+        auto proof = proofRoundtrip(db.exportProofRange(txn, db.getHeadNodeId(txn), 0, quadrable::Key::fromInteger(500), quadrable::Key::fromInteger(510)));
+
+        db.checkout();
+
+        db.importProof(txn, proof, origRoot);
+
+        std::string_view val;
+
+        for (uint64_t i = 500; i < 510; i++) {
+            verify(db.getRaw(txn, quadrable::Key::fromInteger(i).sv(), val));
+            verify(val == std::to_string(i));
+        }
+
+        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(499).sv(), val), "incomplete tree");
+        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(511).sv(), val), "incomplete tree");
+        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(9999).sv(), val), "incomplete tree");
+        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(1).sv(), val), "incomplete tree");
+    });
+
+
+
+
 
     txn.abort();
 
     /*
     for(size_t i=0; i<=256; i++) {
-        Hash h = Hash::existingHash(from_hex("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
-        h.keepPrefixBits(i);
-        std::cout << i << " : " << to_hex(h.str()) << std::endl;
+        Key k = Key::existing(from_hex("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
+        k.keepPrefixBits(i);
+        std::cout << i << " : " << to_hex(k.str()) << std::endl;
     }
     */
 }

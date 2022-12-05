@@ -21,7 +21,7 @@
 
 #include "quadrable/varint.h"
 #include "quadrable/utils.h"
-#include "quadrable/key.h"
+#include "quadrable/Key.h"
 
 // Internal-only
 

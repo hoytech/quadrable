@@ -138,6 +138,12 @@ class Key {
         return !!(data[n / 8] & (128 >> (n % 8)));
     }
 
+    void setBit(size_t n, uint64_t b) {
+        if (n > 255) throw quaderr("setBit index too high");
+        data[n / 8] &= ~(128 >> (n % 8));
+        if (b) data[n / 8] |= (128 >> (n % 8));
+    }
+
     void keepPrefixBits(size_t n) {
         if (n > 256) throw quaderr("requested to zero out too many bits");
         if (n == 256) return;
@@ -152,6 +158,18 @@ class Key {
 
 inline bool operator <(const Key &h1, const Key &h2) {
     return memcmp(h1.data, h2.data, sizeof(h1.data)) < 0;
+}
+
+inline bool operator <=(const Key &h1, const Key &h2) {
+    return memcmp(h1.data, h2.data, sizeof(h1.data)) <= 0;
+}
+
+inline bool operator >(const Key &h1, const Key &h2) {
+    return memcmp(h1.data, h2.data, sizeof(h1.data)) > 0;
+}
+
+inline bool operator >=(const Key &h1, const Key &h2) {
+    return memcmp(h1.data, h2.data, sizeof(h1.data)) >= 0;
 }
 
 inline bool operator ==(const Key &h1, const Key &h2) {

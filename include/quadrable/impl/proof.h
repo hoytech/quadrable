@@ -30,6 +30,7 @@ Proof exportProofRaw(lmdb::txn &txn, const std::vector<Key> &keys) {
     return exportProofAux(txn, keyHashes);
 }
 
+
 Proof exportProofAux(lmdb::txn &txn, ProofHashes &keyHashes) {
     auto headNodeId = getHeadNodeId(txn);
 
@@ -106,6 +107,80 @@ void exportProofAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t pa
         throw quaderr("unrecognized nodeType: ", int(node.nodeType));
     }
 }
+
+
+
+
+Proof exportProofRange(lmdb::txn &txn, uint64_t nodeId, uint64_t depthLimit, const Key &begin, const Key &end) {
+    ProofGenItems items;
+    ProofReverseNodeMap reverseMap;
+    Key currPath = Key::null();
+
+    exportProofRangeAux(txn, 0, nodeId, 0, depthLimit, currPath, begin, end, items, reverseMap);
+
+    Proof output;
+
+    output.cmds = exportProofCmds(txn, items, reverseMap, nodeId);
+
+    for (auto &item : items) {
+        output.strands.emplace_back(std::move(item.strand));
+    }
+
+    return output;
+}
+
+
+
+void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, uint64_t depthLimit, Key &currPath, const Key &begin, const Key &end, ProofGenItems &items, ProofReverseNodeMap &reverseMap) {
+    ParsedNode node(txn, dbi_node, nodeId);
+
+    if (node.isEmpty()) {
+        Key h = currPath;
+        h.keepPrefixBits(depth);
+
+        items.emplace_back(ProofGenItem{
+            nodeId,
+            parentNodeId,
+            ProofStrand{ ProofStrand::Type::WitnessEmpty, depth, h.str(), },
+        });
+    } else if (node.isLeaf()) {
+        if (node.nodeType == NodeType::WitnessLeaf) {
+            throw quaderr("incomplete tree, missing leaf to make proof");
+        }
+
+        std::string_view leafKey;
+        getLeafKey(txn, node.nodeId, leafKey);
+
+        items.emplace_back(ProofGenItem{
+            nodeId,
+            parentNodeId,
+            ProofStrand{ ProofStrand::Type::Leaf, depth, std::string(node.leafKeyHash()), std::string(node.leafVal()), std::string(leafKey) },
+        });
+    } else if (node.isBranch()) {
+        assertDepth(depth);
+
+        if (node.leftNodeId) reverseMap.emplace(node.leftNodeId, nodeId);
+        if (node.rightNodeId) reverseMap.emplace(node.rightNodeId, nodeId);
+
+        currPath.setBit(depth, 1);
+        bool doLeft = begin < currPath;
+        bool doRight = end >= currPath;
+
+        currPath.setBit(depth, 0);
+        if (doLeft) exportProofRangeAux(txn, depth+1, node.leftNodeId, nodeId, depthLimit, currPath, begin, end, items, reverseMap);
+
+        currPath.setBit(depth, 1);
+        if (doRight) exportProofRangeAux(txn, depth+1, node.rightNodeId, nodeId, depthLimit, currPath, begin, end, items, reverseMap);
+
+        currPath.setBit(depth, 0);
+    } else if (node.nodeType == NodeType::Witness) {
+        throw quaderr("encountered witness node: incomplete tree");
+    } else {
+        throw quaderr("unrecognized nodeType: ", int(node.nodeType));
+    }
+}
+
+
 
 struct GenProofItemAccum {
     size_t index;
