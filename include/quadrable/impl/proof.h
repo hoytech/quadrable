@@ -71,30 +71,67 @@ using ProofFragmentResponses = std::vector<Proof>;
 
 
 
+ProofFragmentResponses exportProofFragments(lmdb::txn &txn, uint64_t nodeId, ProofFragmentRequests &reqs, uint64_t bytesBudget) {
+    if (reqs.size() == 0) throw quaderr("empty fragments request");
 
-Proof exportProofFragment(lmdb::txn &txn, uint64_t nodeId, Key currPath, uint64_t startDepth, uint64_t depthLimit) {
-    currPath.keepPrefixBits(startDepth);
-
-    uint64_t depth = 0;
-
-    while (depth < startDepth) {
-        ParsedNode node(txn, dbi_node, nodeId);
-
-        if (!node.isBranch()) throw quaderr("invalid path during proof export");
-
-        nodeId = currPath.getBit(depth) == 0 ? node.leftNodeId : node.rightNodeId;
-
-        depth++;
+    for (size_t i = 1; i < reqs.size() - 1; i++) {
+        if (reqs[i].path <= reqs[i - 1].path) throw quaderr("fragments request out of order");
     }
+
+    ProofFragmentResponses resps;
+    Key currPath = Key::null();
+
+    exportProofFragmentsAux(txn, 0, nodeId, 0, currPath, reqs.begin(), reqs.end(), resps);
+
+    return resps;
+}
+
+
+void exportProofFragmentsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, Key &currPath, ProofFragmentRequests::iterator begin, ProofFragmentRequests::iterator end, ProofFragmentResponses &resps) {
+    if (begin == end) {
+        return;
+    }
+
+    ParsedNode node(txn, dbi_node, nodeId);
+
+    if (std::next(begin) == end && depth == begin->startDepth) {
+        resps.emplace_back(exportProofFragmentSingle(txn, nodeId, currPath, *begin));
+        return;
+    }
+
+    if (node.isBranch()) {
+        auto middle = begin;
+        while (middle != end && !middle->path.getBit(depth)) ++middle;
+
+        assertDepth(depth);
+
+        if (node.leftNodeId || middle == end) {
+            exportProofFragmentsAux(txn, depth+1, node.leftNodeId, nodeId, currPath, begin, middle, resps);
+        }
+
+        if (node.rightNodeId || begin == middle) {
+            currPath.setBit(depth, 1);
+            exportProofFragmentsAux(txn, depth+1, node.rightNodeId, nodeId, currPath, middle, end, resps);
+            currPath.setBit(depth, 0);
+        }
+    } else {
+        throw quaderr("fragment path not available");
+    }
+}
+
+Proof exportProofFragmentSingle(lmdb::txn &txn, uint64_t nodeId, Key currPath, const ProofFragmentRequest &req) {
+    uint64_t depth = req.startDepth;
+
+    currPath.keepPrefixBits(depth);
 
     ProofGenItems items;
     ProofReverseNodeMap reverseMap;
 
-    exportProofRangeAux(txn, startDepth, nodeId, 0, depthLimit, currPath, Key::null(), Key::max(), items, reverseMap);
+    exportProofRangeAux(txn, depth, nodeId, 0, req.depthLimit, currPath, Key::null(), Key::max(), items, reverseMap);
 
     Proof output;
 
-    output.cmds = exportProofCmds(txn, items, reverseMap, nodeId, startDepth);
+    output.cmds = exportProofCmds(txn, items, reverseMap, nodeId, depth);
 
     for (auto &item : items) {
         output.strands.emplace_back(std::move(item.strand));
@@ -431,7 +468,7 @@ BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof, uint64_t expectedDep
     }
 
     if (accums[0].next != -1) throw quaderr("not all proof strands were merged");
-    if (accums[0].depth != expectedDepth) throw quaderr("proof didn't reach expected depth");
+    //FIXME if (accums[0].depth != expectedDepth) throw quaderr("proof didn't reach expected depth");
 
     return BuiltNode::stubbed(accums[0].nodeId, accums[0].nodeHash);
 }

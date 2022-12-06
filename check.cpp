@@ -1191,30 +1191,42 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        Key currPath = quadrable::Key::fromInteger(500);
-        currPath.keepPrefixBits(10);
-        uint64_t startDepth = 10;
+        Quadrable::ProofFragmentRequests reqs;
 
-        auto proof = proofRoundtrip(db.exportProofFragment(txn, db.getHeadNodeId(txn), currPath, startDepth, 0));
+        {
+            Key currPath = quadrable::Key::fromInteger(500);
+            currPath.keepPrefixBits(10);
+            uint64_t startDepth = 10;
 
-        db.checkout();
-
-        db.importProof(txn, proof);
-        dump();
-
-/*
-        std::string_view val;
-
-        for (uint64_t i = 500; i < 510; i++) {
-            verify(db.getRaw(txn, quadrable::Key::fromInteger(i).sv(), val));
-            verify(val == std::to_string(i));
+            reqs.push_back({
+                currPath,
+                startDepth,
+                0,
+                true,
+            });
         }
 
-        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(499).sv(), val), "incomplete tree");
-        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(511).sv(), val), "incomplete tree");
-        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(9999).sv(), val), "incomplete tree");
-        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(1).sv(), val), "incomplete tree");
-        */
+        {
+            Key currPath = quadrable::Key::fromInteger(2100);
+            currPath.keepPrefixBits(13);
+            uint64_t startDepth = 13;
+
+            reqs.push_back({
+                currPath,
+                startDepth,
+                0,
+                true,
+            });
+        }
+
+        auto resps = db.exportProofFragments(txn, db.getHeadNodeId(txn), reqs, 0);
+
+        for (auto &resp : resps) {
+            auto proof = proofRoundtrip(resp);
+            db.checkout();
+            db.importProof(txn, proof);
+            dump();
+        }
     });
 
 
