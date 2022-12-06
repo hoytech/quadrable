@@ -66,8 +66,6 @@ struct ProofFragmentRequest {
 using ProofFragmentRequests = std::vector<ProofFragmentRequest>;
 using ProofFragmentResponses = std::vector<Proof>;
 
-// ProofFragmentResponses exportProofFragments(lmdb::txn &txn, uint64_t nodeId, const ProofFragmentRequests &reqs, uint64_t bytesBudget)
-// BuiltNode importProofFragments(lmdb::txn &txn, const ProofFragmentRequests &reqs, const ProofFragmentResponses &resps)
 
 
 
@@ -167,6 +165,28 @@ BuiltNode mergeProof(lmdb::txn &txn, Proof &proof) {
     return rootNode;
 }
 
+struct ProofFragmentItem {
+    ProofFragmentRequest *req;
+    ProofFragmentResponse *resp;
+};
+
+BuiltNode importProofFragments(lmdb::txn &txn, ProofFragmentRequests &reqs, ProofFragmentResponses &resps) {
+    std::vector<ProofFragmentItem> fragItems;
+
+    if (resps.size() > reqs.size()) throw quaderr("too many resps when importing fragments");
+
+    for (size_t i = 0; i < resps.size(); i++) {
+        fragItems.emplace_back({ &reqs[i], &resps[i] });
+    }
+
+    if (fragItems.size() == 0) throw quaderr("no fragments to import");
+
+    uint64_t nodeId = getHeadNodeId(txn);
+
+    auto newRootNode = importProofFragmentsAux(txn, nodeId, fragItems.begin(), fragItems.end());
+
+    // FIXME: compare hashes. if same, then setHeadNodeId
+}
 
 
 
