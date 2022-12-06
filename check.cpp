@@ -97,6 +97,7 @@ void doTests() {
 
 
 
+/*
     test("basic put/get", [&]{
         db.change()
           .put("hello", "world")
@@ -1144,13 +1145,11 @@ void doTests() {
 
 
     test("range proofs", [&]{
-        uint64_t skip = 1;
-
         db.checkout();
 
         {
             auto c = db.change();
-            for (uint64_t i = 1; i < 10000; i += skip) {
+            for (uint64_t i = 1; i < 10000; i++) {
                 c.put(quadrable::Key::fromInteger(i), std::to_string(i));
             }
             c.apply(txn);
@@ -1158,7 +1157,7 @@ void doTests() {
 
         auto origRoot = db.root(txn);
 
-        auto proof = proofRoundtrip(db.exportProofRange(txn, db.getHeadNodeId(txn), 0, quadrable::Key::fromInteger(500), quadrable::Key::fromInteger(510)));
+        auto proof = proofRoundtrip(db.exportProofRange(txn, db.getHeadNodeId(txn), quadrable::Key::fromInteger(500), quadrable::Key::fromInteger(510)));
 
         db.checkout();
 
@@ -1176,6 +1175,48 @@ void doTests() {
         verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(9999).sv(), val), "incomplete tree");
         verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(1).sv(), val), "incomplete tree");
     });
+
+*/
+
+    test("proof fragments", [&]{
+        db.checkout();
+
+        {
+            auto c = db.change();
+            for (uint64_t i = 1; i < 10000; i++) {
+                c.put(quadrable::Key::fromInteger(i), std::to_string(i));
+            }
+            c.apply(txn);
+        }
+
+        auto origRoot = db.root(txn);
+
+        Key currPath = quadrable::Key::fromInteger(500);
+        currPath.keepPrefixBits(10);
+        uint64_t startDepth = 10;
+
+        auto proof = proofRoundtrip(db.exportProofFragment(txn, db.getHeadNodeId(txn), currPath, startDepth, 0));
+
+        db.checkout();
+
+        db.importProof(txn, proof);
+        dump();
+
+/*
+        std::string_view val;
+
+        for (uint64_t i = 500; i < 510; i++) {
+            verify(db.getRaw(txn, quadrable::Key::fromInteger(i).sv(), val));
+            verify(val == std::to_string(i));
+        }
+
+        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(499).sv(), val), "incomplete tree");
+        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(511).sv(), val), "incomplete tree");
+        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(9999).sv(), val), "incomplete tree");
+        verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(1).sv(), val), "incomplete tree");
+        */
+    });
+
 
 
 

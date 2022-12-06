@@ -55,6 +55,13 @@ void setHeadNodeId(lmdb::txn &txn, uint64_t nodeId) {
     }
 }
 
+/* FIXME needed?
+void setHeadWitness(lmdb::txn &txn, const Key &key) {
+    auto node = BuiltNode::newWitness(this, txn, key);
+    setHeadNodeId(txn, node.nodeId);
+}
+*/
+
 void fork(lmdb::txn &txn) {
     uint64_t nodeId = getHeadNodeId(txn);
     checkout();

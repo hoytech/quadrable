@@ -1,4 +1,4 @@
-public:
+private:
 
 struct ProofGenItem {
     uint64_t nodeId;
@@ -9,6 +9,10 @@ struct ProofGenItem {
 using ProofGenItems = std::vector<ProofGenItem>;
 using ProofHashes = std::map<Key, std::string>; // keyHash -> key
 using ProofReverseNodeMap = std::map<uint64_t, uint64_t>; // child -> parent
+
+public:
+
+// Export interface
 
 Proof exportProof(lmdb::txn &txn, const std::vector<std::string> &keys) {
     ProofHashes keyHashes;
@@ -29,6 +33,107 @@ Proof exportProofRaw(lmdb::txn &txn, const std::vector<Key> &keys) {
 
     return exportProofAux(txn, keyHashes);
 }
+
+Proof exportProofRange(lmdb::txn &txn, uint64_t nodeId, const Key &begin, const Key &end) {
+    ProofGenItems items;
+    ProofReverseNodeMap reverseMap;
+    Key currPath = Key::null();
+    uint64_t depthLimit = std::numeric_limits<uint64_t>::max();
+
+    exportProofRangeAux(txn, 0, nodeId, 0, depthLimit, currPath, begin, end, items, reverseMap);
+
+    Proof output;
+
+    output.cmds = exportProofCmds(txn, items, reverseMap, nodeId);
+
+    for (auto &item : items) {
+        output.strands.emplace_back(std::move(item.strand));
+    }
+
+    return output;
+}
+
+
+
+
+struct ProofFragmentRequest {
+    Key path;
+    uint64_t startDepth;
+    uint64_t depthLimit;
+    bool expandLeaves;
+};
+
+using ProofFragmentRequests = std::vector<ProofFragmentRequest>;
+using ProofFragmentResponses = std::vector<Proof>;
+
+// ProofFragmentResponses exportProofFragments(lmdb::txn &txn, uint64_t nodeId, const ProofFragmentRequests &reqs, uint64_t bytesBudget)
+// BuiltNode importProofFragments(lmdb::txn &txn, const ProofFragmentRequests &reqs, const ProofFragmentResponses &resps)
+
+
+
+
+Proof exportProofFragment(lmdb::txn &txn, uint64_t nodeId, Key currPath, uint64_t startDepth, uint64_t depthLimit) {
+    currPath.keepPrefixBits(startDepth);
+
+    uint64_t depth = 0;
+
+    while (depth < startDepth) {
+        ParsedNode node(txn, dbi_node, nodeId);
+
+        if (!node.isBranch()) throw quaderr("invalid path during proof export");
+
+        nodeId = currPath.getBit(depth) == 0 ? node.leftNodeId : node.rightNodeId;
+
+        depth++;
+    }
+
+    ProofGenItems items;
+    ProofReverseNodeMap reverseMap;
+
+    exportProofRangeAux(txn, startDepth, nodeId, 0, depthLimit, currPath, Key::null(), Key::max(), items, reverseMap);
+
+    Proof output;
+
+    output.cmds = exportProofCmds(txn, items, reverseMap, nodeId, startDepth);
+
+    for (auto &item : items) {
+        output.strands.emplace_back(std::move(item.strand));
+    }
+
+    return output;
+}
+
+
+// Import interface
+
+BuiltNode importProof(lmdb::txn &txn, Proof &proof, std::string expectedRoot = "") {
+    if (getHeadNodeId(txn)) throw quaderr("can't importProof into non-empty head");
+
+    auto rootNode = importProofInternal(txn, proof);
+
+    if (expectedRoot.size() && rootNode.nodeHash != expectedRoot) throw quaderr("proof invalid");
+
+    setHeadNodeId(txn, rootNode.nodeId);
+
+    return rootNode;
+}
+
+BuiltNode mergeProof(lmdb::txn &txn, Proof &proof) {
+    auto rootNode = importProofInternal(txn, proof);
+
+    if (rootNode.nodeHash != root(txn)) throw quaderr("different roots, unable to merge proofs");
+
+    auto updatedRoot = mergeProofInternal(txn, getHeadNodeId(txn), rootNode.nodeId);
+
+    setHeadNodeId(txn, updatedRoot.nodeId);
+
+    return rootNode;
+}
+
+
+
+
+private:
 
 
 Proof exportProofAux(lmdb::txn &txn, ProofHashes &keyHashes) {
@@ -110,27 +215,6 @@ void exportProofAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t pa
 
 
 
-
-Proof exportProofRange(lmdb::txn &txn, uint64_t nodeId, uint64_t depthLimit, const Key &begin, const Key &end) {
-    ProofGenItems items;
-    ProofReverseNodeMap reverseMap;
-    Key currPath = Key::null();
-
-    exportProofRangeAux(txn, 0, nodeId, 0, depthLimit, currPath, begin, end, items, reverseMap);
-
-    Proof output;
-
-    output.cmds = exportProofCmds(txn, items, reverseMap, nodeId);
-
-    for (auto &item : items) {
-        output.strands.emplace_back(std::move(item.strand));
-    }
-
-    return output;
-}
-
-
-
 void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, uint64_t depthLimit, Key &currPath, const Key &begin, const Key &end, ProofGenItems &items, ProofReverseNodeMap &reverseMap) {
     ParsedNode node(txn, dbi_node, nodeId);
 
@@ -192,7 +276,7 @@ struct GenProofItemAccum {
     std::vector <ProofCmd> proofCmds;
 };
 
-std::vector<ProofCmd> exportProofCmds(lmdb::txn &txn, ProofGenItems &items, ProofReverseNodeMap &reverseMap, uint64_t headNodeId) {
+std::vector<ProofCmd> exportProofCmds(lmdb::txn &txn, ProofGenItems &items, ProofReverseNodeMap &reverseMap, uint64_t headNodeId, uint64_t startDepth = 0) {
     if (items.size() == 0) return {};
 
     std::vector<GenProofItemAccum> accums;
@@ -210,7 +294,7 @@ std::vector<ProofCmd> exportProofCmds(lmdb::txn &txn, ProofGenItems &items, Proo
 
     // Complexity: O(N*D) = O(N*log(N))
 
-    for (; currDepth > 0; currDepth--) {
+    for (; currDepth > startDepth; currDepth--) {
         for (ssize_t i = 0; i != -1; i = accums[i].next) {
             auto &curr = accums[i];
             if (curr.depth != currDepth) continue;
@@ -247,7 +331,7 @@ std::vector<ProofCmd> exportProofCmds(lmdb::txn &txn, ProofGenItems &items, Proo
         }
     }
 
-    assert(accums[0].depth == 0);
+    assert(accums[0].depth == startDepth);
     assert(accums[0].nodeId == headNodeId);
     assert(accums[0].next == -1);
     accums[0].mergedOrder = currMergeOrder;
@@ -264,6 +348,12 @@ std::vector<ProofCmd> exportProofCmds(lmdb::txn &txn, ProofGenItems &items, Proo
 
 
 
+
+
+
+
+
+
 struct ImportProofItemAccum {
     uint64_t depth;
     uint64_t nodeId;
@@ -274,31 +364,7 @@ struct ImportProofItemAccum {
     bool merged = false;
 };
 
-BuiltNode importProof(lmdb::txn &txn, Proof &proof, std::string expectedRoot = "") {
-    if (getHeadNodeId(txn)) throw quaderr("can't importProof into non-empty head");
-
-    auto rootNode = importProofInternal(txn, proof);
-
-    if (expectedRoot.size() && rootNode.nodeHash != expectedRoot) throw quaderr("proof invalid");
-
-    setHeadNodeId(txn, rootNode.nodeId);
-
-    return rootNode;
-}
-
-BuiltNode mergeProof(lmdb::txn &txn, Proof &proof) {
-    auto rootNode = importProofInternal(txn, proof);
-
-    if (rootNode.nodeHash != root(txn)) throw quaderr("different roots, unable to merge proofs");
-
-    auto updatedRoot = mergeProofInternal(txn, getHeadNodeId(txn), rootNode.nodeId);
-
-    setHeadNodeId(txn, updatedRoot.nodeId);
-
-    return rootNode;
-}
-
-BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof) {
+BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof, uint64_t expectedDepth = 0) {
     std::vector<ImportProofItemAccum> accums;
 
     for (size_t i = 0; i < proof.strands.size(); i++) {
@@ -365,7 +431,7 @@ BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof) {
     }
 
     if (accums[0].next != -1) throw quaderr("not all proof strands were merged");
-    if (accums[0].depth != 0) throw quaderr("proof didn't reach root");
+    if (accums[0].depth != expectedDepth) throw quaderr("proof didn't reach expected depth");
 
     return BuiltNode::stubbed(accums[0].nodeId, accums[0].nodeHash);
 }
