@@ -1189,6 +1189,8 @@ void doTests() {
             c.apply(txn);
         }
 
+        // Build reqs and resps
+
         auto origRoot = db.root(txn);
 
         Quadrable::ProofFragmentRequests reqs;
@@ -1221,12 +1223,18 @@ void doTests() {
 
         auto resps = db.exportProofFragments(txn, db.getHeadNodeId(txn), reqs, 0);
 
-        for (auto &resp : resps) {
-            auto proof = proofRoundtrip(resp);
-            db.checkout();
-            db.importProof(txn, proof);
-            dump();
-        }
+        //for (auto &resp : resps) {
+        //    auto proof = proofRoundtrip(resp);
+        //    db.checkout();
+        //    db.importProof(txn, proof);
+        //    dump();
+        //}
+
+        // Import
+
+        db.checkout();
+
+        db.setHeadWitness(txn, Key::existing(origRoot));
     });
 
 

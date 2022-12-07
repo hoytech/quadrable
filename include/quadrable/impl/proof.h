@@ -167,25 +167,68 @@ BuiltNode mergeProof(lmdb::txn &txn, Proof &proof) {
 
 struct ProofFragmentItem {
     ProofFragmentRequest *req;
-    ProofFragmentResponse *resp;
+    Proof *proof;
 };
 
+using ProofFragmentItems = std::vector<ProofFragmentItem>;
+
 BuiltNode importProofFragments(lmdb::txn &txn, ProofFragmentRequests &reqs, ProofFragmentResponses &resps) {
-    std::vector<ProofFragmentItem> fragItems;
+    ProofFragmentItems fragItems;
 
     if (resps.size() > reqs.size()) throw quaderr("too many resps when importing fragments");
 
     for (size_t i = 0; i < resps.size(); i++) {
-        fragItems.emplace_back({ &reqs[i], &resps[i] });
+        fragItems.emplace_back(ProofFragmentItem{ &reqs[i], &resps[i] });
     }
 
     if (fragItems.size() == 0) throw quaderr("no fragments to import");
 
     uint64_t nodeId = getHeadNodeId(txn);
 
-    auto newRootNode = importProofFragmentsAux(txn, nodeId, fragItems.begin(), fragItems.end());
+    auto newRootNode = importProofFragmentsAux(txn, nodeId, 0, fragItems.begin(), fragItems.end());
 
     // FIXME: compare hashes. if same, then setHeadNodeId
+
+    return newRootNode;
+}
+
+BuiltNode importProofFragmentsAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth, ProofFragmentItems::iterator begin, ProofFragmentItems::iterator end) {
+    ParsedNode origNode(txn, dbi_node, nodeId);
+
+    if (begin != end && std::next(begin) == end) {
+        if (!origNode.isWitnessAny()) throw quaderr("import proof fragment tried to expand non-witness");
+
+        auto newNode = importProofInternal(txn, *begin->proof, depth);
+
+        if (newNode.nodeHash != origNode.nodeHash()) throw quaderr("import proof fragment incompatible tree");
+
+        return newNode;
+    }
+
+    if (origNode.isBranch()) {
+        auto middle = begin;
+        while (middle != end && !middle->req->path.getBit(depth)) ++middle;
+
+        assertDepth(depth);
+
+        BuiltNode newLeftNode, newRightNode;
+
+        if (origNode.leftNodeId || middle == end) {
+            newLeftNode = importProofFragmentsAux(txn, origNode.leftNodeId, depth + 1, begin, middle);
+        } else {
+            newLeftNode = BuiltNode::reuse(ParsedNode(txn, dbi_node, origNode.leftNodeId));
+        }
+
+        if (origNode.rightNodeId || begin == middle) {
+            newRightNode = importProofFragmentsAux(txn, origNode.rightNodeId, depth + 1, middle, end);
+        } else {
+            newRightNode = BuiltNode::reuse(ParsedNode(txn, dbi_node, origNode.rightNodeId));
+        }
+
+        return BuiltNode::newBranch(this, txn, newLeftNode, newRightNode);
+    } else {
+        return BuiltNode::reuse(origNode);
+    }
 }
 
 

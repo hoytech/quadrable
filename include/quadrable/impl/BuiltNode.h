@@ -12,7 +12,7 @@ class BuiltNode {
         return {0, Key::null(), NodeType::Empty};
     }
 
-    static BuiltNode reuse(ParsedNode &node) {
+    static BuiltNode reuse(const ParsedNode &node) {
         return {node.nodeId, Key::existing(node.nodeHash()), node.nodeType};
     }
 

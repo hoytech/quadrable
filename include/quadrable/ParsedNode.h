@@ -53,34 +53,34 @@ class ParsedNode {
         }
     }
 
-    bool isEmpty() { return nodeType == NodeType::Empty; }
-    bool isLeaf() { return nodeType == NodeType::Leaf || nodeType == NodeType::WitnessLeaf; }
-    bool isBranch() { return nodeType == NodeType::BranchLeft || nodeType == NodeType::BranchRight || nodeType == NodeType::BranchBoth; }
-    bool isWitness() { return nodeType == NodeType::Witness; }
-    bool isWitnessLeaf() { return nodeType == NodeType::WitnessLeaf; }
-    bool isWitnessAny() { return nodeType == NodeType::Witness || nodeType == NodeType::WitnessLeaf; }
+    bool isEmpty() const { return nodeType == NodeType::Empty; }
+    bool isLeaf() const { return nodeType == NodeType::Leaf || nodeType == NodeType::WitnessLeaf; }
+    bool isBranch() const { return nodeType == NodeType::BranchLeft || nodeType == NodeType::BranchRight || nodeType == NodeType::BranchBoth; }
+    bool isWitness() const { return nodeType == NodeType::Witness; }
+    bool isWitnessLeaf() const { return nodeType == NodeType::WitnessLeaf; }
+    bool isWitnessAny() const { return nodeType == NodeType::Witness || nodeType == NodeType::WitnessLeaf; }
 
-    std::string_view nodeHash() {
+    std::string_view nodeHash() const {
         static const char nullBytes[32] = {};
         if (isEmpty()) return std::string_view{nullBytes, 32};
         return raw.substr(8, 32);
     }
 
-    std::string_view leafKeyHash() {
+    std::string_view leafKeyHash() const {
         if (!isLeaf()) throw quaderr("node is not a Leaf/WitnessLeaf");
         return raw.substr(8 + 32, 32);
     }
 
-    Key key() {
+    Key key() const {
         return Key::existing(leafKeyHash());
     }
 
-    std::string_view leafVal() {
+    std::string_view leafVal() const {
         if (nodeType != NodeType::Leaf) throw quaderr("node is not a Leaf");
         return raw.substr(8 + 32 + 32);
     }
 
-    std::string leafValHash() {
+    std::string leafValHash() const {
         if (nodeType == NodeType::Leaf) {
             return Key::hash(leafVal()).str();
         } else if (nodeType == NodeType::WitnessLeaf) {
