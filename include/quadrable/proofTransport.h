@@ -55,6 +55,9 @@ inline std::string encodeProof(const Proof &p, EncodingType encodingType = Encod
             o += strand.val; // holds valHash
         } else if (strand.strandType == ProofStrand::Type::WitnessEmpty) {
             addKeyHash(strand.keyHash);
+        } else if (strand.strandType == ProofStrand::Type::Witness) {
+            addKeyHash(strand.keyHash);
+            o += strand.val; // holds nodeHash
         } else {
             throw quaderr("unrecognized ProofStrand::Type when encoding proof: ", (int)strand.strandType);
         }
@@ -193,6 +196,9 @@ inline Proof decodeProof(std::string_view encoded) {
             strand.val = std::string(getBytes(32)); // holds valHash
         } else if (strandType == ProofStrand::Type::WitnessEmpty) {
             strand.keyHash = getKeyHash();
+        } else if (strandType == ProofStrand::Type::Witness) {
+            strand.keyHash = getKeyHash();
+            strand.val = std::string(getBytes(32)); // holds nodeHash
         } else {
             throw quaderr("unrecognized ProofStrand::Type when decoding proof: ", (int)strandType);
         }

@@ -92,9 +92,11 @@ void exportProofFragmentsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, ui
 
     ParsedNode node(txn, dbi_node, nodeId);
 
-    if (std::next(begin) == end && depth == begin->startDepth) {
-        resps.emplace_back(exportProofFragmentSingle(txn, nodeId, currPath, *begin));
-        return;
+    for (auto it = begin; it != end; ++it) {
+        if (it->startDepth == depth) {
+            resps.emplace_back(exportProofFragmentSingle(txn, nodeId, currPath, *begin));
+            return;
+        }
     }
 
     if (node.isBranch()) {
@@ -320,7 +322,7 @@ void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64
 
     if (node.isEmpty()) {
         Key h = currPath;
-        h.keepPrefixBits(depth);
+        h.keepPrefixBits(depth); // FIXME: unnecessary, right?
 
         items.emplace_back(ProofGenItem{
             nodeId,
@@ -345,6 +347,18 @@ void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64
 
         if (node.leftNodeId) reverseMap.emplace(node.leftNodeId, nodeId);
         if (node.rightNodeId) reverseMap.emplace(node.rightNodeId, nodeId);
+
+        if (depthLimit == 0) {
+            items.emplace_back(ProofGenItem{
+                nodeId,
+                parentNodeId,
+                ProofStrand{ ProofStrand::Type::Witness, depth, currPath.str(), std::string(node.nodeHash()), },
+            });
+
+            return;
+        }
+
+        if (node.nodeType == NodeType::BranchBoth) depthLimit--;
 
         currPath.setBit(depth, 1);
         bool doLeft = begin < currPath;
@@ -480,6 +494,9 @@ BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof, uint64_t expectedDep
             accums.emplace_back(ImportProofItemAccum{ strand.depth, info.nodeId, next, keyHash, info.nodeHash, });
         } else if (strand.strandType == ProofStrand::Type::WitnessEmpty) {
             accums.emplace_back(ImportProofItemAccum{ strand.depth, 0, next, keyHash, Key::null(), });
+        } else if (strand.strandType == ProofStrand::Type::Witness) {
+            auto info = BuiltNode::newWitness(this, txn, Key::existing(strand.val));
+            accums.emplace_back(ImportProofItemAccum{ strand.depth, info.nodeId, next, keyHash, info.nodeHash, });
         } else {
             throw quaderr("unrecognized ProofItem type: ", int(strand.strandType));
         }

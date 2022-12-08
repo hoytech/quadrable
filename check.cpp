@@ -1197,38 +1197,36 @@ void doTests() {
 
         {
             Key currPath = quadrable::Key::fromInteger(500);
-            currPath.keepPrefixBits(10);
             uint64_t startDepth = 10;
 
             reqs.push_back({
                 currPath,
                 startDepth,
-                0,
+                20,
                 true,
             });
         }
 
         {
             Key currPath = quadrable::Key::fromInteger(2100);
-            currPath.keepPrefixBits(13);
             uint64_t startDepth = 13;
 
             reqs.push_back({
                 currPath,
                 startDepth,
-                0,
+                20,
                 true,
             });
         }
 
         auto resps = db.exportProofFragments(txn, db.getHeadNodeId(txn), reqs, 0);
 
-        //for (auto &resp : resps) {
-        //    auto proof = proofRoundtrip(resp);
-        //    db.checkout();
-        //    db.importProof(txn, proof);
-        //    dump();
-        //}
+        for (auto &resp : resps) {
+            auto proof = proofRoundtrip(resp);
+            db.checkout();
+            db.importProof(txn, proof);
+            dump();
+        }
 
         // Import
 

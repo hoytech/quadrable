@@ -31,10 +31,11 @@ struct ProofStrand {
         Invalid = 1,
         WitnessLeaf = 2,
         WitnessEmpty = 3,
+        Witness = 4,
     } strandType;
     uint64_t depth;
     std::string keyHash;
-    std::string val;  // Type::Leaf: value, Type::WitnessLeaf: hash(value), Type::WitnessEmpty: ignored
+    std::string val;  // Type::Leaf: value, Type::WitnessLeaf: hash(value), Type::WitnessEmpty: ignored, Type::Witness: nodeHash
     std::string key;  // Type::Leaf: key (if available), Type::Witness*: ignored
 };
 
