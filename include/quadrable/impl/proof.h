@@ -92,11 +92,10 @@ void exportProofFragmentsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, ui
 
     ParsedNode node(txn, dbi_node, nodeId);
 
-    for (auto it = begin; it != end; ++it) {
-        if (it->startDepth == depth) {
-            resps.emplace_back(exportProofFragmentSingle(txn, nodeId, currPath, *begin));
-            return;
-        }
+    // FIXME: detect and report error condition where a fragment ends on the path of another fragment
+    if (begin != end && std::next(begin) == end && begin->startDepth == depth) {
+        resps.emplace_back(exportProofFragmentSingle(txn, nodeId, currPath, *begin));
+        return;
     }
 
     if (node.isBranch()) {
