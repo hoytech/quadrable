@@ -1,5 +1,10 @@
 public:
 
+struct SavedIterator {
+    Key path = Key::null();
+    uint64_t depth;
+};
+
 struct Iterator {
     friend class Quadrable;
 
@@ -37,10 +42,12 @@ struct Iterator {
             nodeStack.emplace_back(txn, db->dbi_node, nextNodeId);
         }
 
-        if (reverse) {
-            if (nodeStack.back().leafKeyHash() > target.sv()) next();
-        } else {
-            if (nodeStack.back().leafKeyHash() < target.sv()) next();
+        if (nodeStack.back().isLeaf()) {
+            if (reverse) {
+                if (nodeStack.back().leafKeyHash() > target.sv()) next();
+            } else {
+                if (nodeStack.back().leafKeyHash() < target.sv()) next();
+            }
         }
     }
 
@@ -76,6 +83,32 @@ struct Iterator {
 
     bool atEnd() {
         return nodeStack.size() == 0 || nodeStack.back().nodeId == 0;
+    }
+
+    SavedIterator save() {
+        SavedIterator s;
+
+        s.depth = nodeStack.size() - 1;
+
+        if (nodeStack.size() == 0) throw quaderr("empty nodeStack");
+
+        for (size_t i = 0; i < nodeStack.size() - 1; i++) {
+            s.path.setBit(i, nodeStack[i].rightNodeId == nodeStack[i + 1].nodeId);
+        }
+
+        return s;
+    }
+
+    bool restore(lmdb::txn &txn_, const SavedIterator &s) {
+        nodeStack.clear();
+        nodeStack.emplace_back(txn, db->dbi_node, db->getHeadNodeId(txn));
+
+        for (size_t i = 0; i < s.depth; i++) {
+            if (!nodeStack.back().isBranch()) return false;
+            nodeStack.emplace_back(txn, db->dbi_node, s.path.getBit(i) ? nodeStack.back().rightNodeId : nodeStack.back().leftNodeId);
+        }
+
+        return true;
     }
 };
 
