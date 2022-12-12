@@ -39,8 +39,9 @@ Proof exportProofRange(lmdb::txn &txn, uint64_t nodeId, const Key &begin, const 
     ProofReverseNodeMap reverseMap;
     Key currPath = Key::null();
     uint64_t depthLimit = std::numeric_limits<uint64_t>::max();
+    bool expandLeaves = true;
 
-    exportProofRangeAux(txn, 0, nodeId, 0, depthLimit, currPath, begin, end, items, reverseMap);
+    exportProofRangeAux(txn, 0, nodeId, 0, depthLimit, expandLeaves, currPath, begin, end, items, reverseMap);
 
     Proof output;
 
@@ -65,7 +66,6 @@ struct ProofFragmentRequest {
 
 using ProofFragmentRequests = std::vector<ProofFragmentRequest>;
 using ProofFragmentResponses = std::vector<Proof>;
-
 
 
 
@@ -126,7 +126,7 @@ Proof exportProofFragmentSingle(lmdb::txn &txn, uint64_t nodeId, Key currPath, c
     ProofGenItems items;
     ProofReverseNodeMap reverseMap;
 
-    exportProofRangeAux(txn, depth, nodeId, 0, req.depthLimit, currPath, Key::null(), Key::max(), items, reverseMap);
+    exportProofRangeAux(txn, depth, nodeId, 0, req.depthLimit, req.expandLeaves, currPath, Key::null(), Key::max(), items, reverseMap);
 
     Proof output;
 
@@ -173,7 +173,7 @@ struct ProofFragmentItem {
 
 using ProofFragmentItems = std::vector<ProofFragmentItem>;
 
-BuiltNode importProofFragments(lmdb::txn &txn, ProofFragmentRequests &reqs, ProofFragmentResponses &resps) {
+BuiltNode importProofFragments(lmdb::txn &txn, uint64_t nodeId, ProofFragmentRequests &reqs, ProofFragmentResponses &resps) {
     ProofFragmentItems fragItems;
 
     if (resps.size() > reqs.size()) throw quaderr("too many resps when importing fragments");
@@ -184,20 +184,14 @@ BuiltNode importProofFragments(lmdb::txn &txn, ProofFragmentRequests &reqs, Proo
 
     if (fragItems.size() == 0) throw quaderr("no fragments to import");
 
-    uint64_t nodeId = getHeadNodeId(txn);
-
-    auto newRootNode = importProofFragmentsAux(txn, nodeId, 0, fragItems.begin(), fragItems.end());
-
-    // FIXME: compare hashes. if same, then setHeadNodeId
-
-    return newRootNode;
+    return importProofFragmentsAux(txn, nodeId, 0, fragItems.begin(), fragItems.end());
 }
 
 BuiltNode importProofFragmentsAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth, ProofFragmentItems::iterator begin, ProofFragmentItems::iterator end) {
     ParsedNode origNode(txn, dbi_node, nodeId);
 
-    if (begin != end && std::next(begin) == end) {
-        if (!origNode.isWitnessAny()) throw quaderr("import proof fragment tried to expand non-witness");
+    if (begin != end && std::next(begin) == end && begin->req->startDepth == depth) {
+        if (!origNode.isWitnessAny()) throw quaderr("import proof fragment tried to expand non-witness, ", nodeId);
 
         auto newNode = importProofInternal(txn, *begin->proof, depth);
 
@@ -231,6 +225,83 @@ BuiltNode importProofFragmentsAux(lmdb::txn &txn, uint64_t nodeId, uint64_t dept
         return BuiltNode::reuse(origNode);
     }
 }
+
+
+
+ProofFragmentRequests reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs) {
+    ProofFragmentRequests output;
+
+    Key currPath = Key::null();
+
+    reconcileTreesAux(txn, nodeIdOurs, nodeIdTheirs, 0, currPath, output);
+
+    return output;
+}
+
+void reconcileTreesAux(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, ProofFragmentRequests &output) {
+    ParsedNode nodeOurs(txn, dbi_node, nodeIdOurs);
+    ParsedNode nodeTheirs(txn, dbi_node, nodeIdTheirs);
+
+    if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
+
+    if (nodeTheirs.isBranch()) {
+        reconcileTreesAux(txn, nodeOurs.leftNodeId, nodeTheirs.leftNodeId, depth+1, currPath, output);
+        currPath.setBit(depth, 1);
+        reconcileTreesAux(txn, nodeOurs.rightNodeId, nodeTheirs.rightNodeId, depth+1, currPath, output);
+        currPath.setBit(depth, 0);
+    } else if (nodeTheirs.isWitnessLeaf()) {
+        output.emplace_back(ProofFragmentRequest{
+            currPath,
+            depth,
+            1,
+            true,
+        });
+    } else if (nodeTheirs.isWitness()) {
+        output.emplace_back(ProofFragmentRequest{
+            currPath,
+            depth,
+            4,
+            false,
+        });
+    }
+}
+
+
+class Sync {
+  public:
+    Quadrable *db;
+    uint64_t nodeIdOurs;
+    uint64_t nodeIdShadow;
+    bool inited = false;
+
+    Sync(Quadrable *db_, lmdb::txn &txn, uint64_t nodeIdOurs_, const Key &hashShadow) : db(db_), nodeIdOurs(nodeIdOurs_) {
+        auto node = BuiltNode::newWitness(db, txn, hashShadow);
+        nodeIdShadow = node.nodeId;
+    }
+
+    ProofFragmentRequests getReqs(lmdb::txn &txn) {
+        if (!inited) {
+            inited = true;
+            return { ProofFragmentRequest{
+                Key::null(),
+                0,
+                4,
+                false,
+            } };
+        }
+
+        return db->reconcileTrees(txn, nodeIdOurs, nodeIdShadow);
+    }
+
+    void addResps(lmdb::txn &txn, ProofFragmentRequests &reqs, ProofFragmentResponses &resps) {
+        if (resps.size()) inited = true;
+
+        auto newNodeShadow = db->importProofFragments(txn, nodeIdShadow, reqs, resps);
+        // FIXME: make sure hashes match
+        nodeIdShadow = newNodeShadow.nodeId;
+    }
+};
+
 
 
 
@@ -316,7 +387,7 @@ void exportProofAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t pa
 
 
 
-void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, uint64_t depthLimit, Key &currPath, const Key &begin, const Key &end, ProofGenItems &items, ProofReverseNodeMap &reverseMap) {
+void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, uint64_t depthLimit, bool expandLeaves, Key &currPath, const Key &begin, const Key &end, ProofGenItems &items, ProofReverseNodeMap &reverseMap) {
     ParsedNode node(txn, dbi_node, nodeId);
 
     if (node.isEmpty()) {
@@ -336,11 +407,19 @@ void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64
         std::string_view leafKey;
         getLeafKey(txn, node.nodeId, leafKey);
 
-        items.emplace_back(ProofGenItem{
-            nodeId,
-            parentNodeId,
-            ProofStrand{ ProofStrand::Type::Leaf, depth, std::string(node.leafKeyHash()), std::string(node.leafVal()), std::string(leafKey) },
-        });
+        if (expandLeaves) {
+            items.emplace_back(ProofGenItem{
+                nodeId,
+                parentNodeId,
+                ProofStrand{ ProofStrand::Type::Leaf, depth, std::string(node.leafKeyHash()), std::string(node.leafVal()), std::string(leafKey) },
+            });
+        } else {
+            items.emplace_back(ProofGenItem{
+                nodeId,
+                parentNodeId,
+                ProofStrand{ ProofStrand::Type::WitnessLeaf, depth, std::string(node.leafKeyHash()), node.leafValHash(), },
+            });
+        }
     } else if (node.isBranch()) {
         assertDepth(depth);
 
@@ -364,10 +443,10 @@ void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64
         bool doRight = end >= currPath;
 
         currPath.setBit(depth, 0);
-        if (doLeft) exportProofRangeAux(txn, depth+1, node.leftNodeId, nodeId, depthLimit, currPath, begin, end, items, reverseMap);
+        if (doLeft) exportProofRangeAux(txn, depth+1, node.leftNodeId, nodeId, depthLimit, expandLeaves, currPath, begin, end, items, reverseMap);
 
         currPath.setBit(depth, 1);
-        if (doRight) exportProofRangeAux(txn, depth+1, node.rightNodeId, nodeId, depthLimit, currPath, begin, end, items, reverseMap);
+        if (doRight) exportProofRangeAux(txn, depth+1, node.rightNodeId, nodeId, depthLimit, expandLeaves, currPath, begin, end, items, reverseMap);
 
         currPath.setBit(depth, 0);
     } else if (node.nodeType == NodeType::Witness) {
