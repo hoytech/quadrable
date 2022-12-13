@@ -110,7 +110,7 @@ void syncedDiffAux(lmdb::txn &txn, uint64_t nodeId, ParsedNode &searchNode, bool
         syncedDiffAux(txn, node.rightNodeId, searchNode, found, cb);
     } else {
         if (node.nodeHash() == searchNode.nodeHash()) found = true;
-        else if (node.nodeId != 0) cb(DiffType::Added, node);
+        else if (node.nodeId != 0) cb(DiffType::Added, node); // FIXME: needs to be Deleted sometimes right?
     }
 }
 
