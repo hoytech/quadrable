@@ -1,27 +1,27 @@
 public:
 
-struct ProofFragmentRequest {
+struct SyncRequest {
     Key path;
     uint64_t startDepth;
     uint64_t depthLimit;
     bool expandLeaves;
 };
 
-using ProofFragmentRequests = std::vector<ProofFragmentRequest>;
-using ProofFragmentResponses = std::vector<Proof>;
+using SyncRequests = std::vector<SyncRequest>;
+using SyncResponses = std::vector<Proof>;
 
 
-ProofFragmentResponses exportProofFragments(lmdb::txn &txn, uint64_t nodeId, ProofFragmentRequests &reqs, uint64_t bytesBudget) {
+SyncResponses handleSyncRequests(lmdb::txn &txn, uint64_t nodeId, SyncRequests &reqs, uint64_t bytesBudget) {
     if (reqs.size() == 0) throw quaderr("empty fragments request");
 
     for (size_t i = 1; i < reqs.size() - 1; i++) {
         if (reqs[i].path <= reqs[i - 1].path) throw quaderr("fragments request out of order");
     }
 
-    ProofFragmentResponses resps;
+    SyncResponses resps;
     Key currPath = Key::null();
 
-    exportProofFragmentsAux(txn, 0, nodeId, 0, currPath, reqs.begin(), reqs.end(), resps);
+    handleSyncRequestsAux(txn, 0, nodeId, 0, currPath, reqs.begin(), reqs.end(), resps);
 
     return resps;
 }
@@ -39,10 +39,10 @@ class Sync {
         nodeIdShadow = node.nodeId;
     }
 
-    ProofFragmentRequests getReqs(lmdb::txn &txn) {
+    SyncRequests getReqs(lmdb::txn &txn) {
         if (!inited) {
             inited = true;
-            return { ProofFragmentRequest{
+            return { SyncRequest{
                 Key::null(),
                 0,
                 4,
@@ -53,10 +53,10 @@ class Sync {
         return db->reconcileTrees(txn, nodeIdOurs, nodeIdShadow);
     }
 
-    void addResps(lmdb::txn &txn, ProofFragmentRequests &reqs, ProofFragmentResponses &resps) {
+    void addResps(lmdb::txn &txn, SyncRequests &reqs, SyncResponses &resps) {
         if (resps.size()) inited = true;
 
-        auto newNodeShadow = db->importProofFragments(txn, nodeIdShadow, reqs, resps);
+        auto newNodeShadow = db->importSyncResponses(txn, nodeIdShadow, reqs, resps);
         // FIXME: make sure hashes match
         nodeIdShadow = newNodeShadow.nodeId;
     }
@@ -69,7 +69,7 @@ class Sync {
 private:
 
 
-void exportProofFragmentsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, Key &currPath, ProofFragmentRequests::iterator begin, ProofFragmentRequests::iterator end, ProofFragmentResponses &resps) {
+void handleSyncRequestsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, Key &currPath, SyncRequests::iterator begin, SyncRequests::iterator end, SyncResponses &resps) {
     if (begin == end) {
         return;
     }
@@ -78,7 +78,7 @@ void exportProofFragmentsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, ui
 
     // FIXME: detect and report error condition where a fragment ends on the path of another fragment
     if (begin != end && std::next(begin) == end && begin->startDepth == depth) {
-        resps.emplace_back(exportProofFragmentSingle(txn, nodeId, currPath, *begin));
+        resps.emplace_back(exportProofFragment(txn, nodeId, currPath, *begin));
         return;
     }
 
@@ -89,12 +89,12 @@ void exportProofFragmentsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, ui
         assertDepth(depth);
 
         if (node.leftNodeId || middle == end) {
-            exportProofFragmentsAux(txn, depth+1, node.leftNodeId, nodeId, currPath, begin, middle, resps);
+            handleSyncRequestsAux(txn, depth+1, node.leftNodeId, nodeId, currPath, begin, middle, resps);
         }
 
         if (node.rightNodeId || begin == middle) {
             currPath.setBit(depth, 1);
-            exportProofFragmentsAux(txn, depth+1, node.rightNodeId, nodeId, currPath, middle, end, resps);
+            handleSyncRequestsAux(txn, depth+1, node.rightNodeId, nodeId, currPath, middle, end, resps);
             currPath.setBit(depth, 0);
         }
     } else {
@@ -102,7 +102,7 @@ void exportProofFragmentsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, ui
     }
 }
 
-Proof exportProofFragmentSingle(lmdb::txn &txn, uint64_t nodeId, Key currPath, const ProofFragmentRequest &req) {
+Proof exportProofFragment(lmdb::txn &txn, uint64_t nodeId, Key currPath, const SyncRequest &req) {
     uint64_t depth = req.startDepth;
 
     currPath.keepPrefixBits(depth);
@@ -126,28 +126,28 @@ Proof exportProofFragmentSingle(lmdb::txn &txn, uint64_t nodeId, Key currPath, c
 
 
 
-struct ProofFragmentItem {
-    ProofFragmentRequest *req;
+struct SyncRequestAndResponse {
+    SyncRequest *req;
     Proof *proof;
 };
 
-using ProofFragmentItems = std::vector<ProofFragmentItem>;
+using SyncRequestAndResponses = std::vector<SyncRequestAndResponse>;
 
-BuiltNode importProofFragments(lmdb::txn &txn, uint64_t nodeId, ProofFragmentRequests &reqs, ProofFragmentResponses &resps) {
-    ProofFragmentItems fragItems;
+BuiltNode importSyncResponses(lmdb::txn &txn, uint64_t nodeId, SyncRequests &reqs, SyncResponses &resps) {
+    SyncRequestAndResponses fragItems;
 
     if (resps.size() > reqs.size()) throw quaderr("too many resps when importing fragments");
 
     for (size_t i = 0; i < resps.size(); i++) {
-        fragItems.emplace_back(ProofFragmentItem{ &reqs[i], &resps[i] });
+        fragItems.emplace_back(SyncRequestAndResponse{ &reqs[i], &resps[i] });
     }
 
     if (fragItems.size() == 0) throw quaderr("no fragments to import");
 
-    return importProofFragmentsAux(txn, nodeId, 0, fragItems.begin(), fragItems.end());
+    return importSyncResponsesAux(txn, nodeId, 0, fragItems.begin(), fragItems.end());
 }
 
-BuiltNode importProofFragmentsAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth, ProofFragmentItems::iterator begin, ProofFragmentItems::iterator end) {
+BuiltNode importSyncResponsesAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth, SyncRequestAndResponses::iterator begin, SyncRequestAndResponses::iterator end) {
     ParsedNode origNode(txn, dbi_node, nodeId);
 
     if (begin != end && std::next(begin) == end && begin->req->startDepth == depth) {
@@ -169,13 +169,13 @@ BuiltNode importProofFragmentsAux(lmdb::txn &txn, uint64_t nodeId, uint64_t dept
         BuiltNode newLeftNode, newRightNode;
 
         if (origNode.leftNodeId || middle == end) {
-            newLeftNode = importProofFragmentsAux(txn, origNode.leftNodeId, depth + 1, begin, middle);
+            newLeftNode = importSyncResponsesAux(txn, origNode.leftNodeId, depth + 1, begin, middle);
         } else {
             newLeftNode = BuiltNode::reuse(ParsedNode(txn, dbi_node, origNode.leftNodeId));
         }
 
         if (origNode.rightNodeId || begin == middle) {
-            newRightNode = importProofFragmentsAux(txn, origNode.rightNodeId, depth + 1, middle, end);
+            newRightNode = importSyncResponsesAux(txn, origNode.rightNodeId, depth + 1, middle, end);
         } else {
             newRightNode = BuiltNode::reuse(ParsedNode(txn, dbi_node, origNode.rightNodeId));
         }
@@ -188,8 +188,8 @@ BuiltNode importProofFragmentsAux(lmdb::txn &txn, uint64_t nodeId, uint64_t dept
 
 
 
-ProofFragmentRequests reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs) {
-    ProofFragmentRequests output;
+SyncRequests reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs) {
+    SyncRequests output;
 
     Key currPath = Key::null();
 
@@ -198,7 +198,7 @@ ProofFragmentRequests reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64
     return output;
 }
 
-void reconcileTreesAux(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, ProofFragmentRequests &output) {
+void reconcileTreesAux(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, SyncRequests &output) {
     ParsedNode nodeOurs(txn, dbi_node, nodeIdOurs);
     ParsedNode nodeTheirs(txn, dbi_node, nodeIdTheirs);
 
@@ -210,14 +210,14 @@ void reconcileTreesAux(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheir
         reconcileTreesAux(txn, nodeOurs.isBranch() ? nodeOurs.rightNodeId : nodeIdOurs, nodeTheirs.rightNodeId, depth+1, currPath, output);
         currPath.setBit(depth, 0);
     } else if (nodeTheirs.isWitnessLeaf()) {
-        output.emplace_back(ProofFragmentRequest{
+        output.emplace_back(SyncRequest{
             currPath,
             depth,
             1,
             true,
         });
     } else if (nodeTheirs.isWitness()) {
-        output.emplace_back(ProofFragmentRequest{
+        output.emplace_back(SyncRequest{
             currPath,
             depth,
             4,
