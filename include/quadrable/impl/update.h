@@ -23,6 +23,11 @@ class UpdateSet {
         return *this;
     }
 
+    UpdateSet &del(const Key &key) {
+        map.insert_or_assign(key, Update{"", "", true});
+        return *this;
+    }
+
     void apply(lmdb::txn &txn) {
         db->apply(txn, this);
     }
