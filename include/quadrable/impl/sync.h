@@ -65,6 +65,56 @@ class Sync {
 
 
 
+enum class DiffType {
+    Added = 0,
+    Deleted = 1,
+    Changed = 2,
+};
+
+using SyncedDiffCb = std::function<void(DiffType, const ParsedNode &)>;
+
+void syncedDiff(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, const SyncedDiffCb &cb) {
+    ParsedNode nodeOurs(txn, dbi_node, nodeIdOurs);
+    ParsedNode nodeTheirs(txn, dbi_node, nodeIdTheirs);
+
+    if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
+
+    if (nodeOurs.isBranch() && nodeTheirs.isBranch()) {
+        syncedDiff(txn, nodeOurs.leftNodeId, nodeTheirs.leftNodeId, cb);
+        syncedDiff(txn, nodeOurs.rightNodeId, nodeTheirs.rightNodeId, cb);
+    } else if (nodeTheirs.isBranch()) {
+        bool found = false;
+        syncedDiffAux(txn, nodeTheirs.leftNodeId, nodeOurs, found, cb);
+        syncedDiffAux(txn, nodeTheirs.rightNodeId, nodeOurs, found, cb);
+        if (!found) cb(DiffType::Deleted, nodeOurs);
+    } else if (nodeOurs.isBranch()) {
+        bool found = false;
+        syncedDiffAux(txn, nodeOurs.leftNodeId, nodeTheirs, found, cb);
+        syncedDiffAux(txn, nodeOurs.rightNodeId, nodeTheirs, found, cb);
+        if (!found) cb(DiffType::Added, nodeTheirs);
+    } else {
+        if (nodeOurs.isLeaf() && nodeTheirs.isLeaf() && nodeOurs.leafKeyHash() == nodeTheirs.leafKeyHash()) {
+            cb(DiffType::Changed, nodeTheirs);
+        } else {
+            if (nodeOurs.nodeId) cb(DiffType::Deleted, nodeOurs);
+            if (nodeTheirs.nodeId) cb(DiffType::Added, nodeTheirs);
+        }
+    }
+}
+
+void syncedDiffAux(lmdb::txn &txn, uint64_t nodeId, ParsedNode &searchNode, bool &found, const SyncedDiffCb &cb) {
+    ParsedNode node(txn, dbi_node, nodeId);
+
+    if (node.isBranch()) {
+        syncedDiffAux(txn, node.leftNodeId, searchNode, found, cb);
+        syncedDiffAux(txn, node.rightNodeId, searchNode, found, cb);
+    } else {
+        if (node.nodeHash() == searchNode.nodeHash()) found = true;
+        else if (node.nodeId != 0) cb(DiffType::Added, node);
+    }
+}
+
+
 
 private:
 

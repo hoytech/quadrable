@@ -1,12 +1,10 @@
 next
   "sequenced hashes" where first 9 bytes are timestamp, remaining truncated hash
-  proof for a range of values
-  merge two trees (CRDT)
-    - network protocol for smallest proof exchange to do this with remote tree
-  sync
-  flatmaps
+  try flatmaps instead of std::map
   put leaf values in their own DB to reduce fragmentation caused by interior nodes
   in-memory backing store
+  bytesBudget
+  refactor test lib
 
 lib
   ! tests for diff and mergeProof
