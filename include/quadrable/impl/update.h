@@ -6,25 +6,25 @@ class UpdateSet {
   public:
     UpdateSet(Quadrable *db_) : db(db_) {}
 
-    UpdateSet &put(std::string_view keyRaw, std::string_view val) {
-        if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
-        map.insert_or_assign(Key::hash(keyRaw), Update{std::string(db->trackKeys ? keyRaw : ""), std::string(val), false});
+    UpdateSet &put(std::string_view key, std::string_view val) {
+        if (key.size() == 0) throw quaderr("zero-length keys not allowed");
+        map.insert_or_assign(Key::hash(key), Update{std::string(db->trackKeys ? key : ""), std::string(val), false});
         return *this;
     }
 
-    UpdateSet &put(const Key &key, std::string_view val) {
-        map.insert_or_assign(key, Update{"", std::string(val), false});
+    UpdateSet &put(const Key &keyRaw, std::string_view val) {
+        map.insert_or_assign(keyRaw, Update{"", std::string(val), false});
         return *this;
     }
 
-    UpdateSet &del(std::string_view keyRaw) {
-        if (keyRaw.size() == 0) throw quaderr("zero-length keys not allowed");
-        map.insert_or_assign(Key::hash(keyRaw), Update{std::string(keyRaw), "", true});
+    UpdateSet &del(std::string_view key) {
+        if (key.size() == 0) throw quaderr("zero-length keys not allowed");
+        map.insert_or_assign(Key::hash(key), Update{std::string(key), "", true});
         return *this;
     }
 
-    UpdateSet &del(const Key &key) {
-        map.insert_or_assign(key, Update{"", "", true});
+    UpdateSet &del(const Key &keyRaw) {
+        map.insert_or_assign(keyRaw, Update{"", "", true});
         return *this;
     }
 
