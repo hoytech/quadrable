@@ -245,9 +245,9 @@ void reconcileTreesAux(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheir
     if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
 
     if (nodeTheirs.isBranch()) {
-        reconcileTreesAux(txn, nodeOurs.leftNodeId, nodeTheirs.leftNodeId, depth+1, currPath, output);
+        reconcileTreesAux(txn, nodeOurs.isBranch() ? nodeOurs.leftNodeId : nodeIdOurs, nodeTheirs.leftNodeId, depth+1, currPath, output);
         currPath.setBit(depth, 1);
-        reconcileTreesAux(txn, nodeOurs.rightNodeId, nodeTheirs.rightNodeId, depth+1, currPath, output);
+        reconcileTreesAux(txn, nodeOurs.isBranch() ? nodeOurs.rightNodeId : nodeIdOurs, nodeTheirs.rightNodeId, depth+1, currPath, output);
         currPath.setBit(depth, 0);
     } else if (nodeTheirs.isWitnessLeaf()) {
         output.emplace_back(ProofFragmentRequest{
