@@ -4,6 +4,7 @@
 #include <functional>
 #include <vector>
 #include <bitset>
+#include <random>
 
 #include "quadrable.h"
 #include "quadrable/proofTransport.h"
@@ -96,8 +97,6 @@ void doTests() {
     (void)stats;
 
 
-
-/*
     test("basic put/get", [&]{
         db.change()
           .put("hello", "world")
@@ -1191,67 +1190,113 @@ void doTests() {
         verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(1).sv(), val), "incomplete tree");
     });
 
-*/
 
-    test("proof fragments", [&]{
-        db.checkout();
+    test("sync fuzz", [&]{
+        std::mt19937 rnd;
+        rnd.seed(0);
 
-        {
-            auto c = db.change();
-            for (uint64_t i = 1; i < 10000; i++) {
-                c.put(quadrable::Key::fromInteger(i), std::to_string(i));
-            }
-            c.apply(txn);
-        }
+        for (uint trialIter = 0; trialIter < 100; trialIter++) {
+            uint64_t numElems = 500;
+            uint64_t maxElem = 1000;
+            uint64_t numAlterations = 100;
 
-        // Build reqs and resps
-
-        auto origRoot = db.root(txn);
-
-        Quadrable::ProofFragmentRequests reqs;
-
-        {
-            Key currPath = quadrable::Key::fromInteger(500);
-            uint64_t startDepth = 10;
-
-            reqs.push_back({
-                currPath,
-                startDepth,
-                20,
-                true,
-            });
-        }
-
-        {
-            Key currPath = quadrable::Key::fromInteger(2100);
-            uint64_t startDepth = 13;
-
-            reqs.push_back({
-                currPath,
-                startDepth,
-                20,
-                true,
-            });
-        }
-
-        auto resps = db.exportProofFragments(txn, db.getHeadNodeId(txn), reqs, 0);
-
-        for (auto &resp : resps) {
-            auto proof = proofRoundtrip(resp);
             db.checkout();
-            db.importProof(txn, proof);
-            dump();
+
+            {
+                auto c = db.change();
+                for (uint64_t i = 0; i < numElems; i++) {
+                    auto n = rnd() % maxElem;
+                    c.put(quadrable::Key::fromInteger(n), std::to_string(n));
+                }
+                c.apply(txn);
+            }
+
+            uint64_t origNodeId = db.getHeadNodeId(txn);
+            db.fork(txn);
+
+            {
+                auto chg = db.change();
+
+                for (uint64_t i = 0; i < numAlterations; i++) {
+                    auto n = rnd() % maxElem;
+                    auto action = rnd() % 2;
+                    if (action == 0) {
+                        //std::cout << "PUT " << n << std::endl;
+                        chg.put(quadrable::Key::fromInteger(n), std::to_string(n) + " new");
+                    } else if (action == 1) {
+                        //std::cout << "DEL " << n << std::endl;
+                        chg.del(quadrable::Key::fromInteger(n));
+                    }
+                }
+
+                chg.apply(txn);
+            }
+
+            uint64_t newNodeId = db.getHeadNodeId(txn);
+            auto newKey = db.rootKey(txn);
+
+            Quadrable::Sync sync(&db, txn, origNodeId, newKey);
+
+            while(1) {
+                auto reqs = sync.getReqs(txn);
+                if (reqs.size() == 0) break;
+
+                auto resps = db.handleSyncRequests(txn, newNodeId, reqs, 0);
+                sync.addResps(txn, reqs, resps);
+            }
+
+            db.checkout(sync.nodeIdShadow);
+            if (db.rootKey(txn) != newKey) throw quaderr("NOT EQUAL AFTER IMPORT");
+
+            db.checkout(origNodeId);
+            db.fork(txn);
+
+            {
+                auto chg = db.change();
+
+                db.syncedDiff(txn, origNodeId, sync.nodeIdShadow, [&](Quadrable::DiffType dt, const ParsedNode &node){
+                    if (dt == Quadrable::DiffType::Added) {
+                        //std::cout << "add " << node.key().toInteger() << std::endl;
+                        chg.put(node.key(), node.leafVal());
+                    } else if (dt == Quadrable::DiffType::Changed) {
+                        //std::cout << "chg " << node.key().toInteger() << std::endl;
+                        chg.put(node.key(), node.leafVal());
+                    } else {
+                        //std::cout << "del " << node.key().toInteger() << std::endl;
+                        chg.del(node.key());
+                    }
+                });
+
+                chg.apply(txn);
+            }
+
+            auto reconstructedNodeId = db.getHeadNodeId(txn);
+
+            verify(db.rootKey(txn) == newKey);
+            if (db.rootKey(txn) != newKey) {
+                auto diffs = db.diff(txn, origNodeId, reconstructedNodeId);
+                for (auto &d : diffs) {
+                    Key k = Key::existing(d.keyHash);
+                    if (d.deletion) std::cout << "diff: del " << k.toInteger() << std::endl;
+                    else std::cout << "diff: put " << k.toInteger() << std::endl;
+                }
+
+                db.checkout(origNodeId);
+                dump();
+
+                db.checkout(newNodeId);
+                dump();
+
+                db.checkout(reconstructedNodeId);
+                dump();
+
+                db.checkout(sync.nodeIdShadow);
+                dump();
+
+                break;
+            }
         }
-
-        // Import
-
-        db.checkout();
-
-        db.setHeadWitness(txn, Key::existing(origRoot));
     });
-
-
-
 
 
 
