@@ -83,15 +83,27 @@ void syncedDiff(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, cons
         syncedDiff(txn, nodeOurs.leftNodeId, nodeTheirs.leftNodeId, cb);
         syncedDiff(txn, nodeOurs.rightNodeId, nodeTheirs.rightNodeId, cb);
     } else if (nodeTheirs.isBranch()) {
-        bool found = false;
-        syncedDiffAux(txn, nodeTheirs.leftNodeId, nodeOurs, found, cb);
-        syncedDiffAux(txn, nodeTheirs.rightNodeId, nodeOurs, found, cb);
-        if (!found) cb(DiffType::Deleted, nodeOurs);
+        ParsedNode found(txn, dbi_node, 0);
+        syncedDiffAux(txn, nodeTheirs.leftNodeId, nodeOurs, found, DiffType::Added, cb);
+        syncedDiffAux(txn, nodeTheirs.rightNodeId, nodeOurs, found, DiffType::Added, cb);
+        if (nodeOurs.nodeId) {
+            if (found.nodeId) {
+                if (found.nodeHash() != nodeOurs.nodeHash()) cb(DiffType::Changed, found);
+            } else {
+                cb(DiffType::Deleted, nodeOurs);
+            }
+        }
     } else if (nodeOurs.isBranch()) {
-        bool found = false;
-        syncedDiffAux(txn, nodeOurs.leftNodeId, nodeTheirs, found, cb);
-        syncedDiffAux(txn, nodeOurs.rightNodeId, nodeTheirs, found, cb);
-        if (!found) cb(DiffType::Added, nodeTheirs);
+        ParsedNode found(txn, dbi_node, 0);
+        syncedDiffAux(txn, nodeOurs.leftNodeId, nodeTheirs, found, DiffType::Deleted, cb);
+        syncedDiffAux(txn, nodeOurs.rightNodeId, nodeTheirs, found, DiffType::Deleted, cb);
+        if (nodeTheirs.nodeId) {
+            if (found.nodeId) {
+                if (found.nodeHash() != nodeTheirs.nodeHash()) cb(DiffType::Changed, nodeTheirs);
+            } else {
+                cb(DiffType::Added, nodeTheirs);
+            }
+        }
     } else {
         if (nodeOurs.isLeaf() && nodeTheirs.isLeaf() && nodeOurs.leafKeyHash() == nodeTheirs.leafKeyHash()) {
             cb(DiffType::Changed, nodeTheirs);
@@ -102,15 +114,15 @@ void syncedDiff(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, cons
     }
 }
 
-void syncedDiffAux(lmdb::txn &txn, uint64_t nodeId, ParsedNode &searchNode, bool &found, const SyncedDiffCb &cb) {
+void syncedDiffAux(lmdb::txn &txn, uint64_t nodeId, ParsedNode &searchNode, ParsedNode &found, DiffType dt, const SyncedDiffCb &cb) {
     ParsedNode node(txn, dbi_node, nodeId);
 
     if (node.isBranch()) {
-        syncedDiffAux(txn, node.leftNodeId, searchNode, found, cb);
-        syncedDiffAux(txn, node.rightNodeId, searchNode, found, cb);
+        syncedDiffAux(txn, node.leftNodeId, searchNode, found, dt, cb);
+        syncedDiffAux(txn, node.rightNodeId, searchNode, found, dt, cb);
     } else {
-        if (node.nodeHash() == searchNode.nodeHash()) found = true;
-        else if (node.nodeId != 0) cb(DiffType::Added, node); // FIXME: needs to be Deleted sometimes right?
+        if (searchNode.nodeId != 0 && node.nodeId != 0 && node.leafKeyHash() == searchNode.leafKeyHash()) found = node;
+        else if (node.nodeId != 0) cb(dt, node);
     }
 }
 

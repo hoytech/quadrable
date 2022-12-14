@@ -181,6 +181,10 @@ inline bool operator ==(const Key &h1, std::string_view sv) {
     return memcmp(h1.data, sv.data(), sizeof(h1.data)) == 0;
 }
 
+inline bool operator !=(const Key &h1, const Key &h2) {
+    return !(h1 == h2);
+}
+
 inline bool operator !=(const Key &h1, std::string_view sv) {
     return !(h1 == sv);
 }

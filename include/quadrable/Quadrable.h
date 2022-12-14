@@ -36,6 +36,7 @@ class Quadrable {
     #include "quadrable/impl/leafKeys.h"
     #include "quadrable/impl/Iterator.h"
     #include "quadrable/impl/proof.h"
+    #include "quadrable/impl/sync.h"
     #include "quadrable/impl/walk.h"
     #include "quadrable/impl/stats.h"
     #include "quadrable/impl/gc.h"

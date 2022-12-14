@@ -17,6 +17,14 @@ std::string root(lmdb::txn &txn) {
     return std::string(node.nodeHash());
 }
 
+Key rootKey(lmdb::txn &txn) {
+    uint64_t nodeId = getHeadNodeId(txn);
+
+    ParsedNode node(txn, dbi_node, nodeId);
+
+    return Key::existing(node.nodeHash());
+}
+
 void checkout(uint64_t nodeId = 0) {
     detachedHead = true;
     detachedHeadNodeId = nodeId;
