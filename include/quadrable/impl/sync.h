@@ -27,6 +27,15 @@ SyncResponses handleSyncRequests(lmdb::txn &txn, uint64_t nodeId, SyncRequests &
 }
 
 
+
+enum class DiffType {
+    Added = 0,
+    Deleted = 1,
+    Changed = 2,
+};
+
+using SyncedDiffCb = std::function<void(DiffType, const ParsedNode &)>;
+
 class Sync {
   public:
     Quadrable *db;
@@ -57,74 +66,67 @@ class Sync {
         if (resps.size()) inited = true;
 
         auto newNodeShadow = db->importSyncResponses(txn, nodeIdShadow, reqs, resps);
-        // FIXME: make sure hashes match
+
+        if (db->root(txn, nodeIdShadow) != db->root(txn, newNodeShadow.nodeId)) throw quaderr("hash mismatch after addResps");
+
         nodeIdShadow = newNodeShadow.nodeId;
     }
-};
 
+    void diff(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, const SyncedDiffCb &cb) {
+        ParsedNode nodeOurs(txn, db->dbi_node, nodeIdOurs);
+        ParsedNode nodeTheirs(txn, db->dbi_node, nodeIdTheirs);
 
+        if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
 
-
-enum class DiffType {
-    Added = 0,
-    Deleted = 1,
-    Changed = 2,
-};
-
-using SyncedDiffCb = std::function<void(DiffType, const ParsedNode &)>;
-
-void syncedDiff(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, const SyncedDiffCb &cb) {
-    ParsedNode nodeOurs(txn, dbi_node, nodeIdOurs);
-    ParsedNode nodeTheirs(txn, dbi_node, nodeIdTheirs);
-
-    if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
-
-    if (nodeOurs.isBranch() && nodeTheirs.isBranch()) {
-        syncedDiff(txn, nodeOurs.leftNodeId, nodeTheirs.leftNodeId, cb);
-        syncedDiff(txn, nodeOurs.rightNodeId, nodeTheirs.rightNodeId, cb);
-    } else if (nodeTheirs.isBranch()) {
-        ParsedNode found(txn, dbi_node, 0);
-        syncedDiffAux(txn, nodeTheirs.leftNodeId, nodeOurs, found, DiffType::Added, cb);
-        syncedDiffAux(txn, nodeTheirs.rightNodeId, nodeOurs, found, DiffType::Added, cb);
-        if (nodeOurs.nodeId) {
-            if (found.nodeId) {
-                if (found.nodeHash() != nodeOurs.nodeHash()) cb(DiffType::Changed, found);
-            } else {
-                cb(DiffType::Deleted, nodeOurs);
+        if (nodeOurs.isBranch() && nodeTheirs.isBranch()) {
+            diff(txn, nodeOurs.leftNodeId, nodeTheirs.leftNodeId, cb);
+            diff(txn, nodeOurs.rightNodeId, nodeTheirs.rightNodeId, cb);
+        } else if (nodeTheirs.isBranch()) {
+            ParsedNode found(txn, db->dbi_node, 0);
+            diffAux(txn, nodeTheirs.leftNodeId, nodeOurs, found, DiffType::Added, cb);
+            diffAux(txn, nodeTheirs.rightNodeId, nodeOurs, found, DiffType::Added, cb);
+            if (nodeOurs.nodeId) {
+                if (found.nodeId) {
+                    if (found.nodeHash() != nodeOurs.nodeHash()) cb(DiffType::Changed, found);
+                } else {
+                    cb(DiffType::Deleted, nodeOurs);
+                }
             }
-        }
-    } else if (nodeOurs.isBranch()) {
-        ParsedNode found(txn, dbi_node, 0);
-        syncedDiffAux(txn, nodeOurs.leftNodeId, nodeTheirs, found, DiffType::Deleted, cb);
-        syncedDiffAux(txn, nodeOurs.rightNodeId, nodeTheirs, found, DiffType::Deleted, cb);
-        if (nodeTheirs.nodeId) {
-            if (found.nodeId) {
-                if (found.nodeHash() != nodeTheirs.nodeHash()) cb(DiffType::Changed, nodeTheirs);
-            } else {
-                cb(DiffType::Added, nodeTheirs);
+        } else if (nodeOurs.isBranch()) {
+            ParsedNode found(txn, db->dbi_node, 0);
+            diffAux(txn, nodeOurs.leftNodeId, nodeTheirs, found, DiffType::Deleted, cb);
+            diffAux(txn, nodeOurs.rightNodeId, nodeTheirs, found, DiffType::Deleted, cb);
+            if (nodeTheirs.nodeId) {
+                if (found.nodeId) {
+                    if (found.nodeHash() != nodeTheirs.nodeHash()) cb(DiffType::Changed, nodeTheirs);
+                } else {
+                    cb(DiffType::Added, nodeTheirs);
+                }
             }
-        }
-    } else {
-        if (nodeOurs.isLeaf() && nodeTheirs.isLeaf() && nodeOurs.leafKeyHash() == nodeTheirs.leafKeyHash()) {
-            cb(DiffType::Changed, nodeTheirs);
         } else {
-            if (nodeOurs.nodeId) cb(DiffType::Deleted, nodeOurs);
-            if (nodeTheirs.nodeId) cb(DiffType::Added, nodeTheirs);
+            if (nodeOurs.isLeaf() && nodeTheirs.isLeaf() && nodeOurs.leafKeyHash() == nodeTheirs.leafKeyHash()) {
+                cb(DiffType::Changed, nodeTheirs);
+            } else {
+                if (nodeOurs.nodeId) cb(DiffType::Deleted, nodeOurs);
+                if (nodeTheirs.nodeId) cb(DiffType::Added, nodeTheirs);
+            }
         }
     }
-}
 
-void syncedDiffAux(lmdb::txn &txn, uint64_t nodeId, ParsedNode &searchNode, ParsedNode &found, DiffType dt, const SyncedDiffCb &cb) {
-    ParsedNode node(txn, dbi_node, nodeId);
+    private:
 
-    if (node.isBranch()) {
-        syncedDiffAux(txn, node.leftNodeId, searchNode, found, dt, cb);
-        syncedDiffAux(txn, node.rightNodeId, searchNode, found, dt, cb);
-    } else {
-        if (searchNode.nodeId != 0 && node.nodeId != 0 && node.leafKeyHash() == searchNode.leafKeyHash()) found = node;
-        else if (node.nodeId != 0) cb(dt, node);
+    void diffAux(lmdb::txn &txn, uint64_t nodeId, ParsedNode &searchNode, ParsedNode &found, DiffType dt, const SyncedDiffCb &cb) {
+        ParsedNode node(txn, db->dbi_node, nodeId);
+
+        if (node.isBranch()) {
+            diffAux(txn, node.leftNodeId, searchNode, found, dt, cb);
+            diffAux(txn, node.rightNodeId, searchNode, found, dt, cb);
+        } else {
+            if (searchNode.nodeId != 0 && node.nodeId != 0 && node.leafKeyHash() == searchNode.leafKeyHash()) found = node;
+            else if (node.nodeId != 0) cb(dt, node);
+        }
     }
-}
+};
 
 
 
@@ -138,7 +140,10 @@ void handleSyncRequestsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint
 
     ParsedNode node(txn, dbi_node, nodeId);
 
-    // FIXME: detect and report error condition where a fragment ends on the path of another fragment
+    // If a fragment ends on the path of another fragment in the SyncRequests list,
+    // then the following will terminate early and the results will be incorrect. So,
+    // it is important the sync requests creator not create requests like this.
+
     if (begin != end && std::next(begin) == end && begin->startDepth == depth) {
         resps.emplace_back(exportProofFragment(txn, nodeId, currPath, *begin));
         return;

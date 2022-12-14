@@ -172,7 +172,6 @@ void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64
 
     if (node.isEmpty()) {
         Key h = currPath;
-        h.keepPrefixBits(depth); // FIXME: unnecessary, right?
 
         items.emplace_back(ProofGenItem{
             nodeId,
@@ -406,7 +405,7 @@ BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof, uint64_t expectedDep
     }
 
     if (accums[0].next != -1) throw quaderr("not all proof strands were merged");
-    //FIXME if (accums[0].depth != expectedDepth) throw quaderr("proof didn't reach expected depth");
+    if (accums[0].depth != expectedDepth) throw quaderr("proof didn't reach expected depth");
 
     return BuiltNode::stubbed(accums[0].nodeId, accums[0].nodeHash);
 }
@@ -418,7 +417,7 @@ BuiltNode mergeProofInternal(lmdb::txn &txn, uint64_t origNodeId, uint64_t newNo
     if ((origNode.isWitnessAny() && !newNode.isWitnessAny()) ||
         (origNode.nodeType == NodeType::Witness && newNode.nodeType == NodeType::WitnessLeaf)) {
 
-        // FIXME: if keys are available on one of them
+        // FIXME: if a key is available on one of the nodes and key tracking is desired, we could import it
         return BuiltNode::reuse(newNode);
     } else if (origNode.isBranch() && newNode.isBranch()) {
         auto newLeftNode = mergeProofInternal(txn, origNode.leftNodeId, newNode.leftNodeId);

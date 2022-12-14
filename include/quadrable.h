@@ -17,6 +17,12 @@
 
 #include "lmdbxx/lmdb++.h"
 
+#ifdef DEV_MOVE
+#include "hoytech/hex.h"
+using hoytech::to_hex;
+using hoytech::from_hex;
+#endif
+
 // Externally useful
 
 #include "quadrable/varint.h"

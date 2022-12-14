@@ -1221,10 +1221,8 @@ void doTests() {
                     auto n = rnd() % maxElem;
                     auto action = rnd() % 2;
                     if (action == 0) {
-                        //std::cout << "PUT " << n << std::endl;
                         chg.put(quadrable::Key::fromInteger(n), std::to_string(n) + " new");
                     } else if (action == 1) {
-                        //std::cout << "DEL " << n << std::endl;
                         chg.del(quadrable::Key::fromInteger(n));
                     }
                 }
@@ -1254,15 +1252,12 @@ void doTests() {
             {
                 auto chg = db.change();
 
-                db.syncedDiff(txn, origNodeId, sync.nodeIdShadow, [&](Quadrable::DiffType dt, const ParsedNode &node){
+                sync.diff(txn, origNodeId, sync.nodeIdShadow, [&](Quadrable::DiffType dt, const ParsedNode &node){
                     if (dt == Quadrable::DiffType::Added) {
-                        //std::cout << "add " << node.key().toInteger() << std::endl;
                         chg.put(node.key(), node.leafVal());
                     } else if (dt == Quadrable::DiffType::Changed) {
-                        //std::cout << "chg " << node.key().toInteger() << std::endl;
                         chg.put(node.key(), node.leafVal());
                     } else {
-                        //std::cout << "del " << node.key().toInteger() << std::endl;
                         chg.del(node.key());
                     }
                 });
@@ -1270,31 +1265,9 @@ void doTests() {
                 chg.apply(txn);
             }
 
-            auto reconstructedNodeId = db.getHeadNodeId(txn);
+            auto reconstructedKey = db.rootKey(txn);
 
-            verify(db.rootKey(txn) == newKey);
-            if (db.rootKey(txn) != newKey) {
-                auto diffs = db.diff(txn, origNodeId, reconstructedNodeId);
-                for (auto &d : diffs) {
-                    Key k = Key::existing(d.keyHash);
-                    if (d.deletion) std::cout << "diff: del " << k.toInteger() << std::endl;
-                    else std::cout << "diff: put " << k.toInteger() << std::endl;
-                }
-
-                db.checkout(origNodeId);
-                dump();
-
-                db.checkout(newNodeId);
-                dump();
-
-                db.checkout(reconstructedNodeId);
-                dump();
-
-                db.checkout(sync.nodeIdShadow);
-                dump();
-
-                break;
-            }
+            verify(reconstructedKey == newKey);
         }
     });
 

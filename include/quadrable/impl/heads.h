@@ -12,6 +12,10 @@ std::string getHead() {
 std::string root(lmdb::txn &txn) {
     uint64_t nodeId = getHeadNodeId(txn);
 
+    return root(txn, nodeId);
+}
+
+std::string root(lmdb::txn &txn, uint64_t nodeId) {
     ParsedNode node(txn, dbi_node, nodeId);
 
     return std::string(node.nodeHash());
@@ -20,6 +24,10 @@ std::string root(lmdb::txn &txn) {
 Key rootKey(lmdb::txn &txn) {
     uint64_t nodeId = getHeadNodeId(txn);
 
+    return rootKey(txn, nodeId);
+}
+
+Key rootKey(lmdb::txn &txn, uint64_t nodeId) {
     ParsedNode node(txn, dbi_node, nodeId);
 
     return Key::existing(node.nodeHash());
