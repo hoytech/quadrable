@@ -283,6 +283,21 @@ void doTests() {
             db.change().put("c", "3").apply(txn);
         });
 
+        equivHeads("deleted neighbour node", [&]{
+            db.change()
+              .put(quadrable::Key::fromInteger(1), "B")
+              .apply(txn);
+        },[&]{
+            db.change()
+              .put(quadrable::Key::fromInteger(1), "A")
+              .apply(txn);
+
+            db.change()
+              .del(quadrable::Key::fromInteger(2))
+              .put(quadrable::Key::fromInteger(1), "B")
+              .apply(txn);
+        });
+
         equivHeads("long bubble", [&]{
             db.change()
               .put("146365204598", "A") // 11111111...

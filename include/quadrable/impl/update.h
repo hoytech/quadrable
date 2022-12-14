@@ -130,8 +130,8 @@ BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &upd
         bool deleteThisLeaf = false;
 
         updates.eraseRange(begin, end, [&](UpdateSetMap::iterator &u){
-            if (u->second.deletion && u->first == node.leafKeyHash()) {
-                deleteThisLeaf = true;
+            if (u->second.deletion) {
+                if (u->first == node.leafKeyHash()) deleteThisLeaf = true;
                 checkBubble = true; // so we check the status of this node after handling any changes further down (may require bubbling up)
             }
             return u->second.deletion;
