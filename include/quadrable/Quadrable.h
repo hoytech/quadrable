@@ -16,6 +16,7 @@ class Quadrable {
     std::string head = "master";
     bool detachedHead = false;
     uint64_t detachedHeadNodeId = 0;
+    MemStore *memStore = nullptr;
 
   public:
 
@@ -41,6 +42,7 @@ class Quadrable {
     #include "quadrable/impl/stats.h"
     #include "quadrable/impl/gc.h"
     #include "quadrable/impl/diff.h"
+    #include "quadrable/impl/MemStore.h"
     #include "quadrable/impl/internal.h"
 };
 
