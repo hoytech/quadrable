@@ -8,12 +8,14 @@ LDLIBS   = -llmdb -lb2 -pthread
 LDFLAGS  = -flto $(XLDFLAGS)
 
 CHECK_SRCS = check.cpp
+SYNCBENCH_SRCS = syncBench.cpp
 TOOL_SRCS  = quadb.cpp
 
 
 CHECK_OBJS := $(CHECK_SRCS:.cpp=.o)
 TOOL_OBJS  := $(TOOL_SRCS:.cpp=.o)
-DEPS       := $(CHECK_SRCS:.cpp=.d) $(TOOL_SRCS:.cpp=.d)
+SYNCBENCH_OBJS := $(SYNCBENCH_SRCS:.cpp=.o)
+DEPS       := $(CHECK_SRCS:.cpp=.d) $(TOOL_SRCS:.cpp=.d) $(SYNCBENCH_SRCS:.cpp=.d)
 
 
 .PHONY: phony
@@ -22,6 +24,9 @@ all: phony verify-submodules quadb check
 
 check: $(CHECK_OBJS) $(DEPS)
 	$(CXX) $(CHECK_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+
+syncBench: $(SYNCBENCH_OBJS) $(DEPS)
+	$(CXX) $(SYNCBENCH_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 quadb: $(TOOL_OBJS) $(DEPS)
 	$(CXX) $(TOOL_OBJS) $(LDFLAGS) $(LDLIBS) -o $@

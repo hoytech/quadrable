@@ -2,6 +2,7 @@
 *.d
 /check
 /quadb
+/syncBench
 
 /quadb-dir/
 /testdb/
