@@ -1,6 +1,6 @@
 ![Quadrable Logo](docs/logo.svg)
 
-Quadrable is an authenticated multi-version database. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. There are [C++](#c-library) and [Solidity](#solidity) libraries, as well as a git-like [command-line tool](#command-line).
+Quadrable is an authenticated multi-version database that can efficiently sync itself with remote instances. It is implemented as a sparse binary merkle tree with compact partial-tree proofs. The primary interface is a header-only [C++](#c-library) library, but there is also a git-like [command-line tool](#command-line).
 
 <!-- TOC FOLLOWS -->
 <!-- START OF TOC -->
@@ -85,6 +85,7 @@ Quadrable is an authenticated multi-version database. It is implemented as a spa
 
 * *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications will result in a new root. Anyone who knows the root value of a database can perform remote queries on it and be confident that the responses are authentic. To accomplish this, the remote server provides a [proof](#proofs) along with each response, which is validated against the root.
 * *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots and checkpoints.
+* *Syncing*: By leveraging the proof functionality, applications can [synchronise](#syncing) with remote instances. Conflict-handling is flexible, and can work by either cloning one side, or merging the states together as a CRDT. By determining which records are present on the remote instance but not the local instance, and vice versa, sync overhead is minimised, and can be optimised for either transfer size or round-trips.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
@@ -104,9 +105,9 @@ Quadrable is a [Log Periodic](https://logperiodic.com) project.
 
 ### Dependencies
 
-The [LMDB](https://symas.com/lmdb/) library and header files are required. On Ubuntu/Debian run this:
+The [LMDB](https://symas.com/lmdb/) and BLAKE2 libraries and header files are required. On Ubuntu/Debian run this:
 
-    sudo apt install -y liblmdb-dev
+    sudo apt install -y liblmdb-dev libb2-dev
 
 ### Compilation
 
@@ -166,7 +167,9 @@ When using Quadrable as a map (as opposed to a [log](#integer-keys)), keys are f
 * Keys of any length can be supported, since a hash will always return a fixed-size output.
 * It puts a bound on the depth of the tree. Because Quadrable uses a 256-bit hash function, the maximum depth is 256 (although it will never actually get that deep since we [collapse leaves](#collapsed-leaves)).
 * Since the hash function used by Quadrable is believed to be cryptographically secure (it behaves like a [random oracle](https://crypto.stackexchange.com/questions/22356/difference-between-hash-function-and-random-oracle)), the keys should be evenly distributed which reduces the average depth of the tree.
-* It is computationally expensive to find two or more distinct keys whose hashes have long common prefixes, which an adversarial user might like to do to increase the cost of traversing the tree or [the proof sizes](#proof-bloating).
+* It is computationally expensive to find two or more distinct keys whose hashes have long common prefixes, which an adversarial user might like to do to increase the cost of traversing the tree or transferring proofs.
+
+However, there are valid use-cases for using keys that are not hashes. In particular, if it is desirable to iterate over ordered ranges of records, keys can be [integers](#integer-keys). Creating proofs that consist of sequential ranges of records are also much smaller than proofs of records with effecitively-random keys.
 
 
 
@@ -190,7 +193,6 @@ The purpose of these changes is to make empty sub-trees at all depths have 32 ze
 * The code is slightly simpler.
 * All-zero roots are user-friendly: It's easy to recognize an empty tree.
 * A run of zeros will compress better, so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
-* In some situations, like an Ethereum smart contract, using all zero values allows some minor optimisations. Specifically, 0 bytes in the calldata are cheaper on gas, contract code size is reduced because pre-calculated empty node values can be omitted, and "uninitialised" memory can be used for some operations. It does not save on storage loads though -- only a naive implementation would cache empty values in storage as opposed to contract code.
 
 
 ### Collapsed Leaves
@@ -202,7 +204,7 @@ In order to reduce this overhead, Quadrable uses another optimisation called *co
 ![](docs/collapsed-leaves.svg)
 
 * Leaves must always be collapsed at the highest possible level to ensure that equivalent trees have equivalent roots.
-* In Quadrable, there is no such thing as a non-collapsed leaf: All leaves are collapsed. For a leaf to reach the very bottom level, there would need to be two distinct keys with the same keyHash (except for the last bit). The collision-resistance property of our hash function allows us to assume this will never happen.
+* In Quadrable, there is no such thing as a non-collapsed leaf: All leaves are collapsed. For a leaf to reach the very bottom level, there would need to be two distinct keys with the same keyHash (except for the last bit). When using hashed keys, the collision-resistance property of our hash function allows us to assume this will never happen. When using custom keys, an encoding should be selected such that shared key prefixes are as short as possible.
 
 An issue with collapsing leaves is that we could lose the ability to distinguish which of the leaves in the sub-tree is the non-empty one. We could not create proofs for these leaves since other people would not be able to detect if we had "moved around" the leaf within the sub-tree.
 
@@ -292,7 +294,7 @@ Now you need to compute the next parent's hash, which requires another witness. 
 ![](docs/proof3.svg)
 
 * Whether the witness is the left child or the right child depends on the value of the path at that level. If it is a `1` then the witness is on the left, since the value is stored underneath the right node (and vice versa). You can think of a witness as a sub-tree that you don't care about, so you just need a summarised value that covers all of the nodes underneath it.
-* There is a witness for every level of the tree. Since Quadrable uses collapsed leaves, this will be less than the full bit-length of the hash. [If we can assume](#proof-bloating) hashes are randomly distributed, then this will be roughly log<sub>2</sub>(N): That is, if there are a million items in the DB there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in witnesses relative to nodes illustrates the beauty of trees and logarithmic growth).
+* There is a witness for every level of the tree. Since Quadrable uses collapsed leaves, this will be less than the full bit-length of the hash. If we assume hashes are randomly distributed, then this will be roughly log<sub>2</sub>(N): That is, if there are a million items in the DB there will be around 20 witnesses. If there are a billion, 30 witnesses (this slow growth in witnesses relative to nodes illustrates the beauty of trees and logarithmic growth).
 * The final computed hash is called the "candidate" root. If this matches the trusted root, then the proof was successful and we have verified the JSON value is accurate. Consider why this is the case: For a parent hash to be the same as another parent hash, the children hashes must be the same also, because we assume nobody can find collisions with our hash function. The same property then follows inductively to the next set of child nodes, all the way until you get to the leaves. So if there is any alteration in the leaf content or the structure of the tree, the candidate root will be different from the trusted root.
 
 
@@ -414,7 +416,7 @@ There are a variety of ways that merkle-tree proofs can be encoded (whether usin
 
 Although new Quadrable proof encodings may be implemented in the future, the first byte will always indicate the encoding type of an encoded proof, and will correspond to the numbers in parentheses above. Since the two encoding types implemented so far are similar, we will describe them concurrently and point out the minor differences as they arise.
 
-Unlike the C++ implementation which first decodes to the `quadrable::Proof` intermediate representation, the Solidity implementation directly processes the external representation.
+Unlike the C++ implementation which first decodes to the `quadrable::Proof` intermediate representation, the [Solidity implementation](https://github.com/hoytech/quadrable-solidity) directly processes the external representation.
 
 
 
@@ -454,7 +456,7 @@ Here is how each strand is encoded:
 * A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is the base 128 integer with the fewest possible digits, most significant digit first, with the most significant bit set on all but the last digit.
 * The "number of trailing 0s" fields affect the following keyHashes which allows keyHashes to take up less space if they have trailing 0 bytes. This is useful for [pushable logs](pushable-logs) since they use integer keys which are much shorter than hashes.
 * The strand types are as follows:
-  * `0`: Leaf (chosen to be 0 since this is probably the most common, and 0 bytes are cheaper in Ethereum calldata)
+  * `0`: Leaf
   * `1`: Invalid
   * `2`: WitnessLeaf
   * `3`: WitnessEmpty
@@ -482,26 +484,6 @@ If the most significant bit is `1` in a command byte, it is a jump:
 * Implementations must check to make sure that a jump command does not jump outside of the list of strands. I thought about making them "wrap around", which could allow some clever encoding-time optimisations, but the added complexity didn't seem worth it.
 
 
-
-### Proof bloating
-
-Since the number of witnesses is proportional to the depth of the tree, given a nicely balanced tree the number of witnesses needed for a proof of one value is roughly the base-2 logarithm of the total number of nodes in the tree. Thanks to the beauty of logarithmic growth, this is usually quite manageable. A tree of a million records needs about 20 witnesses. A billion, 30.
-
-However, since our hashes are 256 bits long, in the worst case scenario we would need 255 witnesses. This happens when all the bits in two keyHashes are the same except for the last one (if *all* the bits were the same with two distinct keys, then records would get overwritten and the data structure would simply be broken). Fortunately, it is computationally expensive to find long shared hash prefixes.
-
-In fact, this is one of the reasons we make sure to hash keys before using them as paths in our tree. If users were able to present hashes of keys to be inserted into the DB without having to provide the corresponding preimages (unhashed versions), then they could deliberately put values into the DB that cause very long proofs to be generated (compare also to [DoS attacks based on hash collisions](https://lwn.net/Articles/474912/)).
-
-If keys can only be selected by trusted parties, then it may make sense to use special non-hash values for keys. This could considerably reduce proof overhead if values commonly requested together are given keys with common prefixes. Quadrable does not yet support this, but it could in the future (trivially, if keys are restricted to exactly 256 bits).
-
-So why are we worried about deep trees and their correspondingly larger proof sizes? The worst case overhead for proving a single value is around 8,000 bytes and a couple hundred calls to the hash function, which is of course trivial for modern networks and CPUs. The issue is that the proof size and computational overhead of verification is part of the security attack surface for some protocols. For instance, if in an [optimistic rollup](https://docs.ethhub.io/ethereum-roadmap/layer-2-scaling/optimistic_rollups/) system verifying a fraud proof requires more gas than is allowed in a single block, then an attacker can get away with fraudulent transactions. The best solution to this is to keep the fraud-proof units granular enough that even heavily bloated proofs can be verified with a [reasonable amount of gas](#gas-usage). Counter-intuitively, this also means it is important for verification code to be gas-efficient, even if it is expected to rarely be called during normal operation of the protocol.
-
-For a point of reference regarding how expensive it is to bloat proof sizes, at the time of writing Bitcoin block hashes start with about 75 leading 0 bits. Generating one of these earns about US $70,000. Unfortunately, for our situation we need to make a distinction. Bitcoin miners are specifically trying to generate block hashes with leading 0 bits (well, technically below a particular target value, but close enough). If somebody is trying to created bloated proofs, it may be sufficient to find *any* two keys with long hash prefixes. These attacks are easier because of the birthday effect, which is the observation that it's easier to find any two people with the same birthday than it is to find somebody with a specific birthday.
-
-Depending on the protocol though, there may be more value in generating partial collisions for particular keys. You can imagine an attacker specifically trying to bloat a victim key so as to cause annoyance or expense to people who verify this key frequently.
-
-There is a `quadb mineHash` command to help brute force search for a key that has a specific hash prefix. This is useful when writing tests for Quadrable, so that you can build up the exact tree you need.
-
-One interesting consequence of the [caching optimisation](#sparseness) that makes sparse merkle trees possible is that it is unnecessary to send empty sub-tree witnesses along with a proof. A single bit suffices to indicate whether a provided witness should be used, or a default hash instead. The nice thing about this is that finding a single long shared keyHash prefix for two keys doesn't really bloat the proof size that much (but it does still increase the hashing overhead). To fully saturate the path, you need partial collisions at every depth. Unfortunately, exponential growth works *against* us here. To find an N-1 bit prefix collision is only half the work of finding an N bit one (in the specific victim key case). Summing the repeated fraction indicates that saturating the witnesses only approximately doubles an attacker's work (and in the birthday attack case they might get this as a free side effect).
 
 
 
@@ -678,7 +660,7 @@ It is slightly more efficient to not store keys in the database, so this should 
 
 The `quadb` command can be used to interact with a Quadrable database. It is loosely modeled after `git`, so it requires sub-commands to activate its various functions. You can run `quadb` with no arguments to see a short help summary and a list of the available sub-commands.
 
-### quadb init
+#### quadb init
 
 Before you can use other commands, you must initialise a directory to contain the Quadrable database. By default it inits `./quadb-dir/`:
 
