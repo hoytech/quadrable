@@ -261,7 +261,7 @@ inline Proof decodeProof(std::string_view encoded) {
 }
 
 
-inline std::string encodeSyncRequests(const Quadrable::SyncRequests &reqs) {
+inline std::string encodeSyncRequests(const SyncRequests &reqs) {
     std::string o;
 
     for (const auto &req : reqs) {
@@ -276,11 +276,11 @@ inline std::string encodeSyncRequests(const Quadrable::SyncRequests &reqs) {
     return o;
 }
 
-inline Quadrable::SyncRequests decodeSyncRequests(std::string_view encoded) {
-    Quadrable::SyncRequests reqs;
+inline SyncRequests decodeSyncRequests(std::string_view encoded) {
+    SyncRequests reqs;
 
     while (encoded.size()) {
-        Quadrable::SyncRequest req;
+        SyncRequest req;
 
         req.path = Key::existing(getKeyHash(encoded));
         req.startDepth = getByte(encoded);
@@ -293,7 +293,7 @@ inline Quadrable::SyncRequests decodeSyncRequests(std::string_view encoded) {
     return reqs;
 }
 
-inline std::string encodeSyncResponses(const Quadrable::SyncResponses &resps, EncodingType encodingType = EncodingType::HashedKeys) {
+inline std::string encodeSyncResponses(const SyncResponses &resps, EncodingType encodingType = EncodingType::HashedKeys) {
     std::string o;
 
     for (const auto &resp : resps) {
@@ -305,8 +305,8 @@ inline std::string encodeSyncResponses(const Quadrable::SyncResponses &resps, En
     return o;
 }
 
-inline Quadrable::SyncResponses decodeSyncResponses(std::string_view encoded) {
-    Quadrable::SyncResponses resps;
+inline SyncResponses decodeSyncResponses(std::string_view encoded) {
+    SyncResponses resps;
 
     while (encoded.size()) {
         auto proofSize = decodeVarInt(encoded);

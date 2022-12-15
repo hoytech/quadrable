@@ -55,4 +55,16 @@ struct Proof {
 };
 
 
+
+struct SyncRequest {
+    Key path;
+    uint64_t startDepth;
+    uint64_t depthLimit;
+    bool expandLeaves;
+};
+
+using SyncRequests = std::vector<SyncRequest>;
+using SyncResponses = std::vector<Proof>;
+
+
 }

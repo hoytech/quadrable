@@ -89,11 +89,11 @@ void doTests() {
         return quadrable::transport::decodeProof(quadrable::transport::encodeProof(p));
     };
 
-    auto syncRequestsRoundtrip = [](const Quadrable::SyncRequests &reqs) {
+    auto syncRequestsRoundtrip = [](const SyncRequests &reqs) {
         return quadrable::transport::decodeSyncRequests(quadrable::transport::encodeSyncRequests(reqs));
     };
 
-    auto syncResponsesRoundtrip = [](const Quadrable::SyncResponses &resps) {
+    auto syncResponsesRoundtrip = [](const SyncResponses &resps) {
         return quadrable::transport::decodeSyncResponses(quadrable::transport::encodeSyncResponses(resps));
     };
 

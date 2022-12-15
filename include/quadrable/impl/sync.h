@@ -1,15 +1,5 @@
 public:
 
-struct SyncRequest {
-    Key path;
-    uint64_t startDepth;
-    uint64_t depthLimit;
-    bool expandLeaves;
-};
-
-using SyncRequests = std::vector<SyncRequest>;
-using SyncResponses = std::vector<Proof>;
-
 
 SyncResponses handleSyncRequests(lmdb::txn &txn, uint64_t nodeId, SyncRequests &reqs, uint64_t bytesBudget) {
     if (reqs.size() == 0) throw quaderr("empty fragments request");
