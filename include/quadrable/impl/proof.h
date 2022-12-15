@@ -34,6 +34,12 @@ Proof exportProofRaw(lmdb::txn &txn, const std::vector<Key> &keys) {
     return exportProofAux(txn, keyHashes);
 }
 
+Proof exportProofRange(lmdb::txn &txn, const Key &begin, const Key &end) {
+    auto headNodeId = getHeadNodeId(txn);
+
+    return exportProofRange(txn, headNodeId, begin, end);
+}
+
 Proof exportProofRange(lmdb::txn &txn, uint64_t nodeId, const Key &begin, const Key &end) {
     ProofGenItems items;
     ProofReverseNodeMap reverseMap;
