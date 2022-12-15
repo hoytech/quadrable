@@ -24,58 +24,26 @@ Quadrable is an authenticated multi-version database that can efficiently sync i
   * [Strands](#strands)
   * [Commands](#commands)
   * [Proof encodings](#proof-encodings)
-    * [External representation](#external-representation)
-  * [Proof bloating](#proof-bloating)
 * [Integer Keys](#integer-keys)
   * [Pushable Logs](#pushable-logs)
   * [Reset Pushable](#reset-pushable)
 * [Storage](#storage)
   * [Copy-On-Write](#copy-on-write)
   * [Heads](#heads)
-    * [Detached Head](#detached-head)
   * [LMDB](#lmdb)
   * [nodeId](#nodeid)
   * [nodeType](#nodetype)
   * [Node layout in storage](#node-layout-in-storage)
   * [Key tracking](#key-tracking)
 * [Command-line](#command-line)
-  * [quadb init](#quadb-init)
-  * [quadb status](#quadb-status)
-  * [quadb put](#quadb-put)
-  * [quadb get](#quadb-get)
-  * [quadb del](#quadb-del)
-  * [quadb push](#quadb-push)
-  * [quadb length](#quadb-length)
-  * [quadb import](#quadb-import)
-  * [quadb export](#quadb-export)
-  * [quadb head](#quadb-head)
-  * [quadb checkout](#quadb-checkout)
-  * [quadb fork](#quadb-fork)
-  * [quadb stats](#quadb-stats)
-  * [quadb diff](#quadb-diff)
-  * [quadb patch](#quadb-patch)
-  * [quadb exportProof](#quadb-exportproof)
-  * [quadb importProof](#quadb-importproof)
-  * [quadb mergeProof](#quadb-mergeproof)
-  * [quadb gc](#quadb-gc)
 * [C++ Library](#c-library)
   * [LMDB Environment](#lmdb-environment)
   * [Character Encoding](#character-encoding)
   * [Managing Heads](#managing-heads)
   * [Operation Batching](#operation-batching)
-    * [Batched Updates](#batched-updates)
-    * [Batched Gets](#batched-gets)
   * [Pushing](#pushing)
   * [Exporting/Importing Proofs](#exporting/importing-proofs)
   * [Garbage Collection](#garbage-collection)
-* [Solidity](#solidity)
-  * [Smart Contract Usage](#smart-contract-usage)
-    * [get](#get)
-    * [put](#put)
-    * [push](#push)
-  * [Memory Layout](#memory-layout)
-  * [Limitations of Solidity Implementation](#limitations-of-solidity-implementation)
-  * [Gas Usage](#gas-usage)
 * [Author and Copyright](#author-and-copyright)
 <!-- END OF TOC -->
 
@@ -677,7 +645,7 @@ Or the `QUADB_DIR` environment variable:
     $ QUADB_DIR=/path/to/quadrable quadb init
     quadb: init'ing directory: /path/to/quadrable
 
-### quadb status
+#### quadb status
 
 The status command shows some basic information about your current database tree:
 
@@ -691,7 +659,7 @@ The status command shows some basic information about your current database tree
 
 The number in parentheses after the root hash is the [nodeId](#nodeid). This is an internal value used by Quadrable and is shown for informational purposes only.
 
-### quadb put
+#### quadb put
 
 This adds a new record to the database, or updates an existing one. On success there is no output:
 
@@ -703,7 +671,7 @@ Unless the value was the same as the previously existing one, the current head w
     Head: master
     Root: 0x0b84df4f4677733fe0956d3e4853868f54a64d0f86ecfcb3712c18e29bd8249c (1)
 
-### quadb get
+#### quadb get
 
 This is the complement to `put`, and is used to retrieve previously set values:
 
@@ -715,7 +683,7 @@ An error will be thrown if you try to get a key that is not present in the tree:
     $ quadb get no-such-key
     quadb error: key not found in db
 
-### quadb del
+#### quadb del
 
 This deletes a key from the database. If there was no such key in the database, it does nothing. On success there is no output:
 
@@ -729,7 +697,7 @@ If we run `status` again, we can see the root has changed back to the all-zeros 
 
 This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order in which records were inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting roots.
 
-### quadb push
+#### quadb push
 
 This pushes a value into the database and updates the [next pushable index](#pushable-logs):
 
@@ -739,7 +707,7 @@ The `--stdin` flag says to read the records from standard input, one per line:
 
     $ perl -E 'for $i (1..1000) { say "value $i" }' | quadb push --stdin
 
-### quadb length
+#### quadb length
 
 Prints out the number of records that have been [pushed](#pushable-logs) onto this database. This is the equivalent to the "next pushable index", or 0 if this has not been set
 
@@ -751,7 +719,7 @@ Prints out the number of records that have been [pushed](#pushable-logs) onto th
 
 Note that this should only be used if using [integer keys](#integer-keys). This value is *not* equivalent to the number of leaves in the tree. To get that number, use [quadb stats](#quadb-stats).
 
-### quadb import
+#### quadb import
 
 If you wish to insert multiple records into the DB, running `quadb put` multiple times is inefficient. This is because each time it is run it will need to create new intermediate nodes and discard the previously created ones.
 
@@ -761,7 +729,7 @@ A better way to do it is to use `quadb import` which can put multiple records wi
 
 * Because of the key/value separator (default `,`) and the newline record separator, you should only use `quadb import` (and `quadb export`) for datasets with restricted key/value characters. For example, if a record contains a comma or a newline, the output would be corrupted. Of course this restriction only applies to the command-line tool: When using the libraries directly there are no restrictions on [character encoding](#character-encoding).
 
-### quadb export
+#### quadb export
 
 This is the complement to `quadb import`. It dumps the contents of the database as a comma-separated (again, customisable with `--sep`) list of lines:
 
@@ -775,7 +743,7 @@ This is the complement to `quadb import`. It dumps the contents of the database 
 
 Note that the output is *not* sorted by the key. It is sorted by the hash of the key, because that is the way records are stored in the tree. You can pipe this output to the `sort` command if you would like it sorted by key.
 
-### quadb head
+#### quadb head
 
 A database can have many [heads](#heads). You can view the list of heads with `quadb head`:
 
@@ -788,7 +756,7 @@ The `=>` arrow indicates that `master` is the current head. The heads are sorted
 
     $ quadb head rm headToRemove
 
-### quadb checkout
+#### quadb checkout
 
 The `checkout` command can be used to change the current head. If we switch to a brand-new head, then this head will start out as the empty tree. For example, let's switch to a brand-new head called `temp`. On success there is no output:
 
@@ -805,7 +773,7 @@ The `tempKey` record that we just inserted only exists in the `temp` head, and i
 
 Running `quadb checkout` with no head name will result in a [detached head](#detached-head) pointing to an empty tree.
 
-### quadb fork
+#### quadb fork
 
 When we created a new head with checkout, it was initialised to an empty tree. Instead, we may choose to use `quadb fork` to copy the current head to the new head:
 
@@ -823,7 +791,7 @@ If no head name is passed in to `quadb fork`, it will fork to a [detached head](
 
 `quadb fork` can take a `--from` option which represents the head to be forked from, instead of using the current head.
 
-### quadb stats
+#### quadb stats
 
 This command traverses the current head and prints a basic summary of its contents:
 
@@ -838,7 +806,7 @@ This command traverses the current head and prints a basic summary of its conten
 Don't confuse this command with [quadb status](#quadb-status).
 
 
-### quadb diff
+#### quadb diff
 
 You can view the differences between the head you have checked out and another head with `quadb diff`. If they are equivalent, there will be no output:
 
@@ -858,7 +826,7 @@ Now the diff shows one line per modification. If the modification was an inserti
 * You can change the separator using the `--sep` option, just as with `import`/`export`.
 * If two trees have been forked from one another recently, then diffs will be very fast. This is because the command will detect shared portions of the tree and not bother diffing them. Diffing two trees that don't share structure (for example, if they were separately `import`ed from the same data) will still work, but will run slower. In the future we may implement a `dedup` command that uses `diff` to detect equal but unshared structure and make them shared.
 
-### quadb patch
+#### quadb patch
 
 This command accepts a diff on standard input, and applies it to the current head.
 
@@ -866,7 +834,7 @@ This command accepts a diff on standard input, and applies it to the current hea
 * Lines that start with `#` are treated as comments and are ignored
 * The separator argument `--sep` must match what was used in the `diff` invocation
 
-### quadb exportProof
+#### quadb exportProof
 
 This command constructs an encoded proof for the supplied keys against the current head, and then prints it to standard output. Here we are generating a hexadecimal proof for two values, `key1` and `no such key`:
 
@@ -879,7 +847,7 @@ This command constructs an encoded proof for the supplied keys against the curre
 * The example above puts the keys after `--`. This is in case you have a key beginning with `-` it won't be interpreted as an option.
 * `--dump` prints a human-readable version of the proof (pre-encoding). This can be helpful for debugging.
 
-### quadb importProof
+#### quadb importProof
 
 This is the complement to `exportProof`. It takes the encoded proof and uses it to create a new partial tree.
 
@@ -896,7 +864,7 @@ The tree can now be read from and updated as usual, as long as no un-proved reco
 * `--hex` must be used if the proof is in hexadecimal.
 * [Enumeration by key](#key-tracking) is only possible if the `FullKeys` proof encoding was specified.
 
-### quadb mergeProof
+#### quadb mergeProof
 
 After importing a proof, if you receive additional proofs against the same database (meaning it has the same root), you can merge these proofs in too:
 
@@ -906,7 +874,7 @@ After importing a proof, if you receive additional proofs against the same datab
 * On success, queries/updates/proofs can access any of the records in either proof.
 * `--hex` must be used if the proof is in hexadecimal.
 
-### quadb gc
+#### quadb gc
 
 This performs a [garbage collection](#garbage-collection) on the database. It deletes nodes that are no longer accessible from any head, and reports basic statistics:
 

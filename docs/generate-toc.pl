@@ -2,6 +2,8 @@
 
 use common::sense;
 
+my $max_levels = 3;
+
 my $lines = '';
 my $headers = [];
 my $seenHeaders = {};
@@ -32,6 +34,8 @@ for my $header (@$headers) {
     $header =~ /^(#+) (.*)/;
     my $prefix = $1;
     my $title = $2;
+
+    next if length($prefix) > $max_levels;
 
     $prefix =~ s/^##//;
     $prefix =~ s/^\s+//;
