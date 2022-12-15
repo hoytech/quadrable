@@ -454,6 +454,14 @@ If the most significant bit is `1` in a command byte, it is a jump:
 
 
 
+## Syncing
+
+Proofs allow us to export a useful portion of the tree and transmit it to a remote entity who can then perform operations on it, or compare it against one of their trees. Any shared structure between the trees is immediately obvious because the hashes of their highest shared nodes will match.
+
+In addition to creating proofs for particular keys or ranges of keys, Quadrable also provides a "sync" operation that is to be used when you don't know the set of keys that you want to prove. Rather than using a depth-first traversal when creating a proof, sync does a breadth-first traversal limited to a particular depth, and proves the existence of any witnesses at that depth. This "proof fragment" is then transmitted to the remote entity, who imports the proof and then compares this against their own version of the tree. Any reconstructed witnesses that match the local nodes indicate that the corresponding sub-trees are identical.
+
+However, any differences in the node hashes between the reconstructed and local tree indicates that more proof fragments need to be retrieved. The remote node will then create a list of "sync requests", which are essentially compressed paths through the tree that the requester wishes to learn more about. Your node would then build "sync responses" to these requests, each of which is another proof fragment created by a depth-limited breadth-first search. However, each fragment's "root" node is actually the node at the compressed path location described in the request.
+
 
 
 ## Integer Keys
@@ -500,13 +508,14 @@ By contrast, if the keys are at random locations in the tree as per their hash v
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --stdin | wc -c
     349981
 
-### Reset Pushable
+### Proof Ranges
 
-If you want to create a proof for somebody who has the root of an old version of a pushable log, you can use `resetPushable` to reset a tree to a previous number of elements. Semantically it works the same as deleting all the elements greater than a specified `n` and resetting the next pushable index to `n`, although it is implemented more efficiently.
+When using integer keys, or other sequential key encoding, there is a large efficiency advantage to creating proofs of adjacent elements, as demonstrated in the previous section.
 
-Similarly, if you receive a proof created with what is claimed to be a previous version of a tree, you can `fork` your more up to date version, `resetPushable` the `length` of the old proof, and compare the roots. This can work even if both proof creator and proof verifier have partial trees and are only interested in maintaining "recent" entries in the log. This can allow protocols to implement a form of garbage collection so database don't grow too large unnecessarily.
+Because of this, Quadrable provides a special method to create proofs of a range of keys (`exportProofRange()`). Such proofs will prove the presence of all keys that exist in this range, and prove the non-presence of all keys in this range that do not exist.
 
-Reset pushable lets pushable logs work in similar way to [merkle mountain ranges](https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md), in the sense that protocols can continue to use old roots even while new entries are being added. A protocol may choose to keep roots available for every hundredth entry, and require proofs to provide the intermediate data.
+The same effect can be achieved by iterating over each in a tree and adding it to a set of elements and then creating a proof normally, but explicitly exporting a range is much more efficient. Additionally, the proof range export methods support specifying a depth limit, which is the mechanism behind the [syncing](#syncing) functionality.
+
 
 
 ## Storage
@@ -1041,6 +1050,36 @@ In order to prove integer keys, you use the `exportProofInteger` method instead:
 
 If the third argument is true, the proof will create a [pushable](#pushable-logs) partial tree.
 
+### Exporting Proof Ranges
+
+As described in [Proof Ranges](#proof-ranges), it is possible to export a range of keys instead of a specific list. This is done with the `exportProofRange` method:
+
+    auto proof = db.exportProofRange(txn, quadrable::Key::fromInteger(100), quadrable::Key::fromInteger(200));
+
+Proofs exported as ranges are identical to regular proofs, so importing is done as usual, with `importProof()`.
+
+### Iterators
+
+For trees that use [integer keys](#integer-keys) (or other ordered key encodings), it can be helpful to loop over a range of keys in the tree in sequence. This can be accomplished by using Quadrable iterators.
+
+Here is an example that iterates over all items in the tree over the range [100, 200), if any exist:
+
+    auto it = db.iterate(txn, quadrable::Key::fromInteger(100));
+
+    while (!it.atEnd() && it.get().key() < quadrable::Key::fromInteger(200)) {
+        // Do something with it.get().leafVal() ...
+        it.next();
+    }
+
+In order to iterate in reverse, the third argument to `db.iterate()` should be `true`, ie:
+
+    auto it = db.iterate(txn, quadrable::Key::fromInteger(200), true);
+
+* Note: iterators should be discarded at the end of an LMDB transaction, or after any write operations are performed within this transaction.
+
+### Sync class
+
+The `Sync` class is a stateful coordinator that FIXME
 
 
 ### Garbage Collection
@@ -1051,10 +1090,9 @@ The `GarbageCollector` class can be used to deallocate unneeded nodes. See the i
 * When you are done marking nodes, call `gc.sweep()`. This must be done inside a read-write transaction. All nodes that weren't found during the mark phase are deleted.
 
 
+
 ## Author and Copyright
 
 Quadrable © 2020-2022 Doug Hoyte.
 
 2-clause BSD license. See the LICENSE file.
-
-Does this stuff interest you? Subscribe for news on my upcoming book: [Zero Copy](https://leanpub.com/zerocopy)!
