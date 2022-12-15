@@ -31,26 +31,18 @@ inline std::string encodeVarInt(uint64_t n) {
     return o;
 }
 
-inline uint64_t decodeVarInt(std::function<unsigned char()> getByte) {
+inline uint64_t decodeVarInt(std::string_view &encoded) {
     uint64_t res = 0;
 
     while (1) {
-        uint64_t byte = getByte();
+        if (encoded.size() == 0) throw quaderr("premature end of varint");
+        uint64_t byte = encoded[0];
+        encoded = encoded.substr(1);
         res = (res << 7) | (byte & 0b0111'1111);
         if ((byte & 0b1000'0000) == 0) break;
     }
 
     return res;
 }
-
-inline uint64_t decodeVarInt(std::string_view s) {
-    size_t next = 0;
-
-    return decodeVarInt([&]{
-        if (next == s.size()) throw quaderr("premature end of varint");
-        return s[next++];
-    });
-}
-
 
 }

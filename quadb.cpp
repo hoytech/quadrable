@@ -12,7 +12,7 @@
 #include <docopt.h>
 
 #include "quadrable.h"
-#include "quadrable/proofTransport.h"
+#include "quadrable/transport.h"
 #include "quadrable/debug.h"
 
 
@@ -394,9 +394,9 @@ void run(int argc, char **argv) {
             std::string encoded;
 
             if (format == "HashedKeys") {
-                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::HashedKeys);
+                encoded = quadrable::transport::encodeProof(proof, quadrable::transport::EncodingType::HashedKeys);
             } else if (format == "FullKeys") {
-                encoded = quadrable::proofTransport::encodeProof(proof, quadrable::proofTransport::EncodingType::FullKeys);
+                encoded = quadrable::transport::encodeProof(proof, quadrable::transport::EncodingType::FullKeys);
             } else {
                 throw quaderr("unknown proof format");
             }
@@ -415,7 +415,7 @@ void run(int argc, char **argv) {
             input = from_hex(input);
         }
 
-        auto proof = quadrable::proofTransport::decodeProof(input);
+        auto proof = quadrable::transport::decodeProof(input);
 
         if (args["--dump"].asBool()) {
             quadrable::dumpProof(proof);
@@ -436,7 +436,7 @@ void run(int argc, char **argv) {
             input = from_hex(input);
         }
 
-        auto proof = quadrable::proofTransport::decodeProof(input);
+        auto proof = quadrable::transport::decodeProof(input);
 
         db.mergeProof(txn, proof);
     } else if (args["mineHash"].asBool()) {

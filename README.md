@@ -1071,13 +1071,13 @@ The `exportProof` function creates inclusion/non-inclusion proofs for the specif
 
     auto proof = db.exportProof(txn, { "key1", "key2", });
 
-    std::string encodedProof = quadrable::proofTransport::encodeProof(proof);
+    std::string encodedProof = quadrable::transport::encodeProof(proof);
 
 The second argument to `exportProof` is a `std::set<std::string>` so you can build up the list of keys programmatically if you desire.
 
 The complement function is called `importProof`:
 
-    auto proof = quadrable::proofTransport::decodeProof(encodedProof);
+    auto proof = quadrable::transport::decodeProof(encodedProof);
 
     db.importProof(txn, proof, trustedRoot);
 

@@ -7,7 +7,7 @@
 #include <random>
 
 #include "quadrable.h"
-#include "quadrable/proofTransport.h"
+#include "quadrable/transport.h"
 #include "quadrable/debug.h"
 
 
@@ -86,7 +86,15 @@ void doTests() {
     };
 
     auto proofRoundtrip = [](const Proof &p) {
-        return quadrable::proofTransport::decodeProof(quadrable::proofTransport::encodeProof(p));
+        return quadrable::transport::decodeProof(quadrable::transport::encodeProof(p));
+    };
+
+    auto syncRequestsRoundtrip = [](const Quadrable::SyncRequests &reqs) {
+        return quadrable::transport::decodeSyncRequests(quadrable::transport::encodeSyncRequests(reqs));
+    };
+
+    auto syncResponsesRoundtrip = [](const Quadrable::SyncResponses &resps) {
+        return quadrable::transport::decodeSyncResponses(quadrable::transport::encodeSyncResponses(resps));
     };
 
     auto dump = [&]{ quadrable::dumpDb(db, txn); };
@@ -1049,7 +1057,7 @@ void doTests() {
                 c.apply(txn);
             }
 
-            auto proof = quadrable::proofTransport::encodeProof(db.exportProofRaw(txn, {
+            auto proof = quadrable::transport::encodeProof(db.exportProofRaw(txn, {
                 quadrable::Key::fromInteger(i),
             }));
 
@@ -1190,7 +1198,6 @@ void doTests() {
         verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(1).sv(), val), "incomplete tree");
     });
 
-
     test("sync fuzz", [&]{
         std::mt19937 rnd;
         rnd.seed(0);
@@ -1236,10 +1243,10 @@ void doTests() {
             Quadrable::Sync sync(&db, txn, origNodeId);
 
             while(1) {
-                auto reqs = sync.getReqs(txn);
+                auto reqs = syncRequestsRoundtrip(sync.getReqs(txn));
                 if (reqs.size() == 0) break;
 
-                auto resps = db.handleSyncRequests(txn, newNodeId, reqs, 0);
+                auto resps = syncResponsesRoundtrip(db.handleSyncRequests(txn, newNodeId, reqs, 0));
                 sync.addResps(txn, reqs, resps);
             }
 

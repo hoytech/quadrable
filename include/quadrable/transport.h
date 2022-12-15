@@ -5,8 +5,41 @@
 
 
 
-namespace quadrable { namespace proofTransport {
+namespace quadrable { namespace transport {
 
+inline std::string encodeKeyHash(std::string_view keyHash) {
+    std::string o;
+
+    uint64_t numTrailingZeros = 0;
+    for (int i = 31; i >= 0; i--) {
+        if (keyHash[static_cast<size_t>(i)] != '\0') break;
+        numTrailingZeros++;
+    }
+
+    o += static_cast<unsigned char>(numTrailingZeros);
+    o += keyHash.substr(0, 32 - numTrailingZeros);
+
+    return o;
+};
+
+inline unsigned char getByte(std::string_view &encoded){
+    if (encoded.size() < 1) throw quaderr("proof ends prematurely");
+    auto res = static_cast<unsigned char>(encoded[0]);
+    encoded = encoded.substr(1);
+    return res;
+};
+
+inline std::string getBytes(std::string_view &encoded, size_t n) {
+    if (encoded.size() < n) throw quaderr("proof ends prematurely");
+    auto res = encoded.substr(0, n);
+    encoded = encoded.substr(n);
+    return std::string(res);
+};
+
+inline std::string getKeyHash(std::string_view &encoded){
+    auto numTrailingZeros = getByte(encoded);
+    return getBytes(encoded, 32 - numTrailingZeros) + std::string(numTrailingZeros, '\0');
+};
 
 
 enum class EncodingType {
@@ -24,16 +57,6 @@ inline std::string encodeProof(const Proof &p, EncodingType encodingType = Encod
 
     // Strands
 
-    auto addKeyHash = [&](std::string_view keyHash){
-        uint64_t numTrailingZeros = 0;
-        for (int i = 31; i >= 0; i--) {
-            if (keyHash[static_cast<size_t>(i)] != '\0') break;
-            numTrailingZeros++;
-        }
-
-        o += static_cast<unsigned char>(numTrailingZeros);
-        o += keyHash.substr(0, 32 - numTrailingZeros);
-    };
 
     for (auto &strand : p.strands) {
         o += static_cast<unsigned char>(strand.strandType);
@@ -41,7 +64,7 @@ inline std::string encodeProof(const Proof &p, EncodingType encodingType = Encod
 
         if (strand.strandType == ProofStrand::Type::Leaf) {
             if (encodingType == EncodingType::HashedKeys) {
-                addKeyHash(strand.keyHash);
+                o += encodeKeyHash(strand.keyHash);
             } else if (encodingType == EncodingType::FullKeys) {
                 if (strand.key.size() == 0) throw quaderr("FullKeys specified in proof encoding, but key not available");
                 o += encodeVarInt(strand.key.size());
@@ -51,12 +74,12 @@ inline std::string encodeProof(const Proof &p, EncodingType encodingType = Encod
             o += encodeVarInt(strand.val.size());
             o += strand.val;
         } else if (strand.strandType == ProofStrand::Type::WitnessLeaf) {
-            addKeyHash(strand.keyHash);
+            o += encodeKeyHash(strand.keyHash);
             o += strand.val; // holds valHash
         } else if (strand.strandType == ProofStrand::Type::WitnessEmpty) {
-            addKeyHash(strand.keyHash);
+            o += encodeKeyHash(strand.keyHash);
         } else if (strand.strandType == ProofStrand::Type::Witness) {
-            addKeyHash(strand.keyHash);
+            o += encodeKeyHash(strand.keyHash);
             o += strand.val; // holds nodeHash
         } else {
             throw quaderr("unrecognized ProofStrand::Type when encoding proof: ", (int)strand.strandType);
@@ -141,29 +164,10 @@ inline std::string encodeProof(const Proof &p, EncodingType encodingType = Encod
 inline Proof decodeProof(std::string_view encoded) {
     Proof proof;
 
-    auto getByte = [&](){
-        if (encoded.size() < 1) throw quaderr("proof ends prematurely");
-        auto res = static_cast<unsigned char>(encoded[0]);
-        encoded = encoded.substr(1);
-        return res;
-    };
-
-    auto getBytes = [&](size_t n){
-        if (encoded.size() < n) throw quaderr("proof ends prematurely");
-        auto res = encoded.substr(0, n);
-        encoded = encoded.substr(n);
-        return res;
-    };
-
-    auto getKeyHash = [&](){
-        auto numTrailingZeros = getByte();
-        return std::string(getBytes(32 - numTrailingZeros)) + std::string(numTrailingZeros, '\0');
-    };
-
 
     // Encoding type
 
-    auto encodingType = static_cast<EncodingType>(getByte());
+    auto encodingType = static_cast<EncodingType>(getByte(encoded));
 
     if (encodingType != EncodingType::HashedKeys && encodingType != EncodingType::FullKeys) {
         throw quaderr("unexpected proof encoding type: ", (int)encodingType);
@@ -172,33 +176,33 @@ inline Proof decodeProof(std::string_view encoded) {
     // Strands
 
     while (1) {
-        auto strandType = static_cast<ProofStrand::Type>(getByte());
+        auto strandType = static_cast<ProofStrand::Type>(getByte(encoded));
 
         if (strandType == ProofStrand::Type::Invalid) break; // end of strands
 
         ProofStrand strand{strandType};
 
-        strand.depth = getByte();
+        strand.depth = getByte(encoded);
 
         if (strandType == ProofStrand::Type::Leaf) {
             if (encodingType == EncodingType::HashedKeys) {
-                strand.keyHash = getKeyHash();
+                strand.keyHash = getKeyHash(encoded);
             } else if (encodingType == EncodingType::FullKeys) {
-                auto keySize = decodeVarInt(getByte);
-                strand.key = std::string(getBytes(keySize));
+                auto keySize = decodeVarInt(encoded);
+                strand.key = getBytes(encoded, keySize);
                 strand.keyHash = Key::hash(strand.key).str();
             }
 
-            auto valSize = decodeVarInt(getByte);
-            strand.val = std::string(getBytes(valSize));
+            auto valSize = decodeVarInt(encoded);
+            strand.val = getBytes(encoded, valSize);
         } else if (strandType == ProofStrand::Type::WitnessLeaf) {
-            strand.keyHash = getKeyHash();
-            strand.val = std::string(getBytes(32)); // holds valHash
+            strand.keyHash = getKeyHash(encoded);
+            strand.val = getBytes(encoded, 32); // holds valHash
         } else if (strandType == ProofStrand::Type::WitnessEmpty) {
-            strand.keyHash = getKeyHash();
+            strand.keyHash = getKeyHash(encoded);
         } else if (strandType == ProofStrand::Type::Witness) {
-            strand.keyHash = getKeyHash();
-            strand.val = std::string(getBytes(32)); // holds nodeHash
+            strand.keyHash = getKeyHash(encoded);
+            strand.val = getBytes(encoded, 32); // holds nodeHash
         } else {
             throw quaderr("unrecognized ProofStrand::Type when decoding proof: ", (int)strandType);
         }
@@ -213,7 +217,7 @@ inline Proof decodeProof(std::string_view encoded) {
     uint64_t currPos = proof.strands.size() - 1; // starts at end
 
     while (encoded.size()) {
-        auto byte = getByte();
+        auto byte = getByte(encoded);
 
         if (byte == 0) {
             proof.cmds.emplace_back(ProofCmd{ ProofCmd::Op::Merge, currPos, });
@@ -223,7 +227,7 @@ inline Proof decodeProof(std::string_view encoded) {
             for (int i=0; i<7; i++) {
                 if (started) {
                     if ((byte & 1)) {
-                        proof.cmds.emplace_back(ProofCmd{ ProofCmd::Op::HashProvided, currPos, std::string(getBytes(32)), });
+                        proof.cmds.emplace_back(ProofCmd{ ProofCmd::Op::HashProvided, currPos, getBytes(encoded, 32), });
                     } else {
                         proof.cmds.emplace_back(ProofCmd{ ProofCmd::Op::HashEmpty, currPos, });
                     }
@@ -256,5 +260,60 @@ inline Proof decodeProof(std::string_view encoded) {
     return proof;
 }
 
+
+inline std::string encodeSyncRequests(const Quadrable::SyncRequests &reqs) {
+    std::string o;
+
+    for (const auto &req : reqs) {
+        o += encodeKeyHash(req.path.sv());
+        if (req.startDepth > 255) throw quaderr("startDepth too big");
+        o += static_cast<unsigned char>(req.startDepth);
+        if (req.depthLimit > 255) throw quaderr("depthLimit too big");
+        o += static_cast<unsigned char>(req.depthLimit);
+        o += static_cast<unsigned char>(req.expandLeaves ? 1 : 0); // 7 bits unused, available for future extensions
+    }
+
+    return o;
+}
+
+inline Quadrable::SyncRequests decodeSyncRequests(std::string_view encoded) {
+    Quadrable::SyncRequests reqs;
+
+    while (encoded.size()) {
+        Quadrable::SyncRequest req;
+
+        req.path = Key::existing(getKeyHash(encoded));
+        req.startDepth = getByte(encoded);
+        req.depthLimit = getByte(encoded);
+        req.expandLeaves = getByte(encoded) & 1;
+
+        reqs.emplace_back(req);
+    }
+
+    return reqs;
+}
+
+inline std::string encodeSyncResponses(const Quadrable::SyncResponses &resps, EncodingType encodingType = EncodingType::HashedKeys) {
+    std::string o;
+
+    for (const auto &resp : resps) {
+        std::string proof = encodeProof(resp);
+        o += encodeVarInt(proof.size());
+        o += proof;
+    }
+
+    return o;
+}
+
+inline Quadrable::SyncResponses decodeSyncResponses(std::string_view encoded) {
+    Quadrable::SyncResponses resps;
+
+    while (encoded.size()) {
+        auto proofSize = decodeVarInt(encoded);
+        resps.emplace_back(decodeProof(getBytes(encoded, proofSize)));
+    }
+
+    return resps;
+}
 
 }}

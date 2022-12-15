@@ -6,7 +6,6 @@ next
     * way to avoid needing to store stuff in lmdb to validate a proof
   bytesBudget
   refactor test lib
-  syncTransport encoding
   sync to/from pruned trees
 
 lib
