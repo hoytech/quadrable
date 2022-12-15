@@ -1,5 +1,4 @@
 next
-  "sequenced hashes" where first 9 bytes are timestamp, remaining truncated hash
   try flatmaps instead of std::map
   separate interior and leaf nodes into their own DBs to reduce fragmentation caused by uneven-sized leaf nodes
     * also normalise interior node size
@@ -8,6 +7,7 @@ next
   bytesBudget
   refactor test lib
   syncTransport encoding
+  sync to/from pruned trees
 
 lib
   ! tests for diff and mergeProof

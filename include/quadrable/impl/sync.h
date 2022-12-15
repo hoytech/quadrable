@@ -43,14 +43,13 @@ class Sync {
     uint64_t nodeIdShadow;
     bool inited = false;
 
-    Sync(Quadrable *db_, lmdb::txn &txn, uint64_t nodeIdOurs_, const Key &hashShadow) : db(db_), nodeIdOurs(nodeIdOurs_) {
-        auto node = BuiltNode::newWitness(db, txn, hashShadow);
+    Sync(Quadrable *db_, lmdb::txn &txn, uint64_t nodeIdOurs_) : db(db_), nodeIdOurs(nodeIdOurs_) {
+        auto node = BuiltNode::newWitness(db, txn, Key::null()); // initial stub node
         nodeIdShadow = node.nodeId;
     }
 
     SyncRequests getReqs(lmdb::txn &txn) {
         if (!inited) {
-            inited = true;
             return { SyncRequest{
                 Key::null(),
                 0,
@@ -63,12 +62,11 @@ class Sync {
     }
 
     void addResps(lmdb::txn &txn, SyncRequests &reqs, SyncResponses &resps) {
-        if (resps.size()) inited = true;
-
         auto newNodeShadow = db->importSyncResponses(txn, nodeIdShadow, reqs, resps);
 
-        if (db->root(txn, nodeIdShadow) != db->root(txn, newNodeShadow.nodeId)) throw quaderr("hash mismatch after addResps");
+        if (inited && db->root(txn, nodeIdShadow) != db->root(txn, newNodeShadow.nodeId)) throw quaderr("hash mismatch after addResps");
 
+        inited = true;
         nodeIdShadow = newNodeShadow.nodeId;
     }
 
@@ -222,7 +220,10 @@ BuiltNode importSyncResponsesAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth
 
         auto newNode = importProofInternal(txn, *begin->proof, depth);
 
-        if (newNode.nodeHash != origNode.nodeHash()) throw quaderr("import proof fragment incompatible tree");
+        if (newNode.nodeHash != origNode.nodeHash()) {
+            bool isInitialStubNode = depth == 0 && origNode.nodeHash() == Key::null().sv() && origNode.isWitness();
+            if (!isInitialStubNode) throw quaderr("import proof fragment incompatible tree");
+        }
 
         return newNode;
     }

@@ -1233,7 +1233,7 @@ void doTests() {
             uint64_t newNodeId = db.getHeadNodeId(txn);
             auto newKey = db.rootKey(txn);
 
-            Quadrable::Sync sync(&db, txn, origNodeId, newKey);
+            Quadrable::Sync sync(&db, txn, origNodeId);
 
             while(1) {
                 auto reqs = sync.getReqs(txn);

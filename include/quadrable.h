@@ -17,7 +17,7 @@
 
 #include "lmdbxx/lmdb++.h"
 
-#ifdef DEV_MOVE
+#ifdef DEV_MODE
 #include "hoytech/hex.h"
 using hoytech::to_hex;
 using hoytech::from_hex;
