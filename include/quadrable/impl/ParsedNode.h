@@ -1,41 +1,24 @@
-#pragma once
-
-namespace quadrable {
-
-
-// For internal DB-use only
-
-enum class NodeType {
-    Empty = 0,
-    BranchLeft = 1,
-    BranchRight = 2,
-    BranchBoth = 3,
-    Leaf = 4,
-    Witness = 5,
-    WitnessLeaf = 6,
-    Invalid = 15,
-};
-
-
+public:
 
 // ParsedNode holds a string_view into the DB, so it shouldn't be held after modifying the DB/ending the transaction
 
 class ParsedNode {
-  public:
+  friend class Quadrable;
 
+  public:
     NodeType nodeType;
     std::string_view raw;
     uint64_t leftNodeId = 0;
     uint64_t rightNodeId = 0;
     uint64_t nodeId;
 
-    ParsedNode(lmdb::txn &txn, lmdb::dbi &dbi_node, uint64_t nodeId_) : nodeId(nodeId_) {
+    ParsedNode(Quadrable *db, lmdb::txn &txn, uint64_t nodeId_) : nodeId(nodeId_) {
         if (nodeId == 0) {
             nodeType = NodeType::Empty;
             return;
         }
 
-        if (!dbi_node.get(txn, lmdb::to_sv<uint64_t>(nodeId), raw)) throw quaderr("couldn't find nodeId ", nodeId);
+        if (!db->dbi_node.get(txn, lmdb::to_sv<uint64_t>(nodeId), raw)) throw quaderr("couldn't find nodeId ", nodeId);
 
         if (raw.size() < 8) throw quaderr("invalid node, too short");
 
@@ -90,6 +73,3 @@ class ParsedNode {
         throw quaderr("node is not a Leaf/WitnessLeaf");
     }
 };
-
-
-}

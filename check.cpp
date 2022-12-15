@@ -1259,7 +1259,7 @@ void doTests() {
             {
                 auto chg = db.change();
 
-                sync.diff(txn, origNodeId, sync.nodeIdShadow, [&](Quadrable::DiffType dt, const ParsedNode &node){
+                sync.diff(txn, origNodeId, sync.nodeIdShadow, [&](Quadrable::DiffType dt, const Quadrable::ParsedNode &node){
                     if (dt == Quadrable::DiffType::Added) {
                         chg.put(node.key(), node.leafVal());
                     } else if (dt == Quadrable::DiffType::Changed) {

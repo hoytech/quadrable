@@ -88,7 +88,7 @@ void del(lmdb::txn &txn, std::string_view key) {
 private:
 
 BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &updates, UpdateSetMap::iterator begin, UpdateSetMap::iterator end, bool &bubbleUp, bool deleteRightSide) {
-    ParsedNode node(txn, dbi_node, nodeId);
+    ParsedNode node(this, txn, nodeId);
     bool checkBubble = false;
 
     // recursion base cases
@@ -190,11 +190,11 @@ BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &upd
             return BuiltNode::empty();
         } else if (leftNode.isLeaf() && rightNode.isEmpty()) {
             bubbleUp = true;
-            ParsedNode n(txn, dbi_node, leftNode.nodeId);
+            ParsedNode n(this, txn, leftNode.nodeId);
             return BuiltNode::reuse(n);
         } else if (leftNode.isEmpty() && rightNode.isLeaf()) {
             bubbleUp = true;
-            ParsedNode n(txn, dbi_node, rightNode.nodeId);
+            ParsedNode n(this, txn, rightNode.nodeId);
             return BuiltNode::reuse(n);
         }
 

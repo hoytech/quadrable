@@ -30,6 +30,7 @@ class Quadrable {
         if (trackKeys) dbi_key = lmdb::dbi::open(txn, "quadrable_key", MDB_CREATE | MDB_INTEGERKEY);
     }
 
+    #include "quadrable/impl/ParsedNode.h"
     #include "quadrable/impl/BuiltNode.h"
     #include "quadrable/impl/heads.h"
     #include "quadrable/impl/get.h"

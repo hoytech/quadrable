@@ -15,7 +15,7 @@ class GarbageCollector {
     }
 
     void markTree(lmdb::txn &txn, uint64_t rootNodeId) {
-        db.walkTree(txn, rootNodeId, [&](quadrable::ParsedNode &node, uint64_t){
+        db.walkTree(txn, rootNodeId, [&](Quadrable::ParsedNode &node, uint64_t){
             if (markedNodes.find(node.nodeId) != markedNodes.end()) return false;
             markedNodes.emplace(node.nodeId);
             return true;

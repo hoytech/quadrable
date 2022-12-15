@@ -3,6 +3,21 @@
 namespace quadrable {
 
 
+// These values are for internal DB reference only (proofs have different values)
+
+enum class NodeType {
+    Empty = 0,
+    BranchLeft = 1,
+    BranchRight = 2,
+    BranchBoth = 3,
+    Leaf = 4,
+    Witness = 5,
+    WitnessLeaf = 6,
+    Invalid = 15,
+};
+
+
+
 struct Update {
     std::string key; // only used if trackKeys is set
     std::string val;

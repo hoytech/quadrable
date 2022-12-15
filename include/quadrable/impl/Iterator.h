@@ -14,7 +14,7 @@ struct Iterator {
     bool reverse;
 
     Iterator(Quadrable *db_, lmdb::txn &txn_, const Key &target, bool reverse_ = false) : db(db_), txn(txn_), reverse(reverse_) {
-        nodeStack.emplace_back(txn, db->dbi_node, db->getHeadNodeId(txn));
+        nodeStack.emplace_back(db, txn, db->getHeadNodeId(txn));
 
         bool leftBias = false;
 
@@ -28,10 +28,10 @@ struct Iterator {
                     nextNodeId = nodeStack.back().rightNodeId;
                     leftBias = true;
                 }
-                nodeStack.emplace_back(txn, db->dbi_node, nextNodeId);
+                nodeStack.emplace_back(db, txn, nextNodeId);
                 break;
             } else {
-                nodeStack.emplace_back(txn, db->dbi_node, nextNodeId);
+                nodeStack.emplace_back(db, txn, nextNodeId);
             }
         }
 
@@ -39,7 +39,7 @@ struct Iterator {
             uint64_t nextNodeId;
             if (leftBias) nextNodeId = nodeStack.back().leftNodeId != 0 ? nodeStack.back().leftNodeId : nodeStack.back().rightNodeId;
             else nextNodeId = nodeStack.back().rightNodeId != 0 ? nodeStack.back().rightNodeId : nodeStack.back().leftNodeId;
-            nodeStack.emplace_back(txn, db->dbi_node, nextNodeId);
+            nodeStack.emplace_back(db, txn, nextNodeId);
         }
 
         if (nodeStack.back().isLeaf()) {
@@ -65,19 +65,19 @@ struct Iterator {
 
         if (nodeStack.size() == 0) return;
 
-        nodeStack.emplace_back(txn, db->dbi_node, reverse ? nodeStack.back().leftNodeId : nodeStack.back().rightNodeId);
+        nodeStack.emplace_back(db, txn, reverse ? nodeStack.back().leftNodeId : nodeStack.back().rightNodeId);
 
         while (nodeStack.back().isBranch()) {
             uint64_t nextNodeId;
             if (reverse) nextNodeId = nodeStack.back().rightNodeId != 0 ? nodeStack.back().rightNodeId : nodeStack.back().leftNodeId;
             else nextNodeId = nodeStack.back().leftNodeId != 0 ? nodeStack.back().leftNodeId : nodeStack.back().rightNodeId;
 
-            nodeStack.emplace_back(txn, db->dbi_node, nextNodeId);
+            nodeStack.emplace_back(db, txn, nextNodeId);
         }
     }
 
     ParsedNode get() {
-        if (nodeStack.size() == 0) return ParsedNode(txn, db->dbi_node, 0);
+        if (nodeStack.size() == 0) return ParsedNode(db, txn, 0);
         return nodeStack.back();
     }
 
@@ -101,11 +101,11 @@ struct Iterator {
 
     bool restore(lmdb::txn &txn_, const SavedIterator &s) {
         nodeStack.clear();
-        nodeStack.emplace_back(txn, db->dbi_node, db->getHeadNodeId(txn));
+        nodeStack.emplace_back(db, txn, db->getHeadNodeId(txn));
 
         for (size_t i = 0; i < s.depth; i++) {
             if (!nodeStack.back().isBranch()) return false;
-            nodeStack.emplace_back(txn, db->dbi_node, s.path.getBit(i) ? nodeStack.back().rightNodeId : nodeStack.back().leftNodeId);
+            nodeStack.emplace_back(db, txn, s.path.getBit(i) ? nodeStack.back().rightNodeId : nodeStack.back().leftNodeId);
         }
 
         return true;

@@ -54,7 +54,7 @@ class BuiltNode {
 
     static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, UpdateSetMap::iterator it) {
         if (it->second.nodeId != 0) {
-            ParsedNode node(txn, db->dbi_node, it->second.nodeId);
+            ParsedNode node(db, txn, it->second.nodeId);
             return reuse(node);
         }
 

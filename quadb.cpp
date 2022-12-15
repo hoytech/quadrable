@@ -236,7 +236,7 @@ void run(int argc, char **argv) {
         std::string sep = ",";
         if (args["--sep"]) sep = args["--sep"].asString();
 
-        db.walkTree(txn, [&](quadrable::ParsedNode &node, uint64_t depth){
+        db.walkTree(txn, [&](Quadrable::ParsedNode &node, uint64_t depth){
             if (!node.isLeaf()) return true;
 
             std::string_view leafKey;

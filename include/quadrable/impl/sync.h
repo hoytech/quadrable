@@ -61,8 +61,8 @@ class Sync {
     }
 
     void diff(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, const SyncedDiffCb &cb) {
-        ParsedNode nodeOurs(txn, db->dbi_node, nodeIdOurs);
-        ParsedNode nodeTheirs(txn, db->dbi_node, nodeIdTheirs);
+        ParsedNode nodeOurs(db, txn, nodeIdOurs);
+        ParsedNode nodeTheirs(db, txn, nodeIdTheirs);
 
         if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
 
@@ -70,7 +70,7 @@ class Sync {
             diff(txn, nodeOurs.leftNodeId, nodeTheirs.leftNodeId, cb);
             diff(txn, nodeOurs.rightNodeId, nodeTheirs.rightNodeId, cb);
         } else if (nodeTheirs.isBranch()) {
-            ParsedNode found(txn, db->dbi_node, 0);
+            ParsedNode found(db, txn, 0);
             diffAux(txn, nodeTheirs.leftNodeId, nodeOurs, found, DiffType::Added, cb);
             diffAux(txn, nodeTheirs.rightNodeId, nodeOurs, found, DiffType::Added, cb);
             if (nodeOurs.nodeId) {
@@ -81,7 +81,7 @@ class Sync {
                 }
             }
         } else if (nodeOurs.isBranch()) {
-            ParsedNode found(txn, db->dbi_node, 0);
+            ParsedNode found(db, txn, 0);
             diffAux(txn, nodeOurs.leftNodeId, nodeTheirs, found, DiffType::Deleted, cb);
             diffAux(txn, nodeOurs.rightNodeId, nodeTheirs, found, DiffType::Deleted, cb);
             if (nodeTheirs.nodeId) {
@@ -104,7 +104,7 @@ class Sync {
     private:
 
     void diffAux(lmdb::txn &txn, uint64_t nodeId, ParsedNode &searchNode, ParsedNode &found, DiffType dt, const SyncedDiffCb &cb) {
-        ParsedNode node(txn, db->dbi_node, nodeId);
+        ParsedNode node(db, txn, nodeId);
 
         if (node.isBranch()) {
             diffAux(txn, node.leftNodeId, searchNode, found, dt, cb);
@@ -126,7 +126,7 @@ void handleSyncRequestsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint
         return;
     }
 
-    ParsedNode node(txn, dbi_node, nodeId);
+    ParsedNode node(this, txn, nodeId);
 
     // If a fragment ends on the path of another fragment in the SyncRequests list,
     // then the following will terminate early and the results will be incorrect. So,
@@ -203,7 +203,7 @@ BuiltNode importSyncResponses(lmdb::txn &txn, uint64_t nodeId, SyncRequests &req
 }
 
 BuiltNode importSyncResponsesAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth, SyncRequestAndResponses::iterator begin, SyncRequestAndResponses::iterator end) {
-    ParsedNode origNode(txn, dbi_node, nodeId);
+    ParsedNode origNode(this, txn, nodeId);
 
     if (begin != end && std::next(begin) == end && begin->req->startDepth == depth) {
         if (!origNode.isWitnessAny()) throw quaderr("import proof fragment tried to expand non-witness, ", nodeId);
@@ -229,13 +229,13 @@ BuiltNode importSyncResponsesAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth
         if (origNode.leftNodeId || middle == end) {
             newLeftNode = importSyncResponsesAux(txn, origNode.leftNodeId, depth + 1, begin, middle);
         } else {
-            newLeftNode = BuiltNode::reuse(ParsedNode(txn, dbi_node, origNode.leftNodeId));
+            newLeftNode = BuiltNode::reuse(ParsedNode(this, txn, origNode.leftNodeId));
         }
 
         if (origNode.rightNodeId || begin == middle) {
             newRightNode = importSyncResponsesAux(txn, origNode.rightNodeId, depth + 1, middle, end);
         } else {
-            newRightNode = BuiltNode::reuse(ParsedNode(txn, dbi_node, origNode.rightNodeId));
+            newRightNode = BuiltNode::reuse(ParsedNode(this, txn, origNode.rightNodeId));
         }
 
         return BuiltNode::newBranch(this, txn, newLeftNode, newRightNode);
@@ -257,8 +257,8 @@ SyncRequests reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeId
 }
 
 void reconcileTreesAux(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, SyncRequests &output) {
-    ParsedNode nodeOurs(txn, dbi_node, nodeIdOurs);
-    ParsedNode nodeTheirs(txn, dbi_node, nodeIdTheirs);
+    ParsedNode nodeOurs(this, txn, nodeIdOurs);
+    ParsedNode nodeTheirs(this, txn, nodeIdTheirs);
 
     if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
 

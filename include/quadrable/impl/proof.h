@@ -118,7 +118,7 @@ void exportProofAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t pa
         return;
     }
 
-    ParsedNode node(txn, dbi_node, nodeId);
+    ParsedNode node(this, txn, nodeId);
 
     if (node.isEmpty()) {
         Key h = begin->first;
@@ -174,7 +174,7 @@ void exportProofAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t pa
 
 
 void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, uint64_t depthLimit, bool expandLeaves, Key &currPath, const Key &begin, const Key &end, ProofGenItems &items, ProofReverseNodeMap &reverseMap) {
-    ParsedNode node(txn, dbi_node, nodeId);
+    ParsedNode node(this, txn, nodeId);
 
     if (node.isEmpty()) {
         Key h = currPath;
@@ -293,11 +293,11 @@ std::vector<ProofCmd> exportProofCmds(lmdb::txn &txn, ProofGenItems &items, Proo
                 }
             }
 
-            ParsedNode parentNode(txn, dbi_node, currParent);
+            ParsedNode parentNode(this, txn, currParent);
             uint64_t siblingNodeId = parentNode.leftNodeId == curr.nodeId ? parentNode.rightNodeId : parentNode.leftNodeId;
 
             if (siblingNodeId) {
-                ParsedNode siblingNode(txn, dbi_node, siblingNodeId);
+                ParsedNode siblingNode(this, txn, siblingNodeId);
                 curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashProvided, static_cast<uint64_t>(i), std::string(siblingNode.nodeHash()), });
             } else {
                 curr.proofCmds.emplace_back(ProofCmd{ ProofCmd::Op::HashEmpty, static_cast<uint64_t>(i), });
@@ -417,8 +417,8 @@ BuiltNode importProofInternal(lmdb::txn &txn, Proof &proof, uint64_t expectedDep
 }
 
 BuiltNode mergeProofInternal(lmdb::txn &txn, uint64_t origNodeId, uint64_t newNodeId) {
-    ParsedNode origNode(txn, dbi_node, origNodeId);
-    ParsedNode newNode(txn, dbi_node, newNodeId);
+    ParsedNode origNode(this, txn, origNodeId);
+    ParsedNode newNode(this, txn, newNodeId);
 
     if ((origNode.isWitnessAny() && !newNode.isWitnessAny()) ||
         (origNode.nodeType == NodeType::Witness && newNode.nodeType == NodeType::WitnessLeaf)) {

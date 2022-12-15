@@ -14,14 +14,14 @@ using hoytech::from_hex;
 namespace quadrable {
 
 
-inline std::string renderNode(quadrable::Quadrable &db, lmdb::txn &txn, ParsedNode &node, size_t abbrev = 0) {
+inline std::string renderNode(quadrable::Quadrable &db, lmdb::txn &txn, Quadrable::ParsedNode &node, size_t abbrev = 0) {
     std::string nodeHash = to_hex(node.nodeHash(), true);
     if (abbrev) nodeHash = nodeHash.substr(0, abbrev+2) + "...";
     return nodeHash + " (" + std::to_string(node.nodeId) + ")";
 }
 
 inline std::string renderNode(quadrable::Quadrable &db, lmdb::txn &txn, uint64_t nodeId) {
-    ParsedNode node(txn, db.dbi_node, nodeId);
+    Quadrable::ParsedNode node(&db, txn, nodeId);
     return renderNode(db, txn, node);
 }
 
@@ -32,7 +32,7 @@ inline std::string renderUnknown(std::string_view hash) {
 
 
 inline void dumpDbAux(quadrable::Quadrable &db, lmdb::txn &txn, uint64_t nodeId, size_t depth) {
-    quadrable::ParsedNode node(txn, db.dbi_node, nodeId);
+    Quadrable::ParsedNode node(&db, txn, nodeId);
 
     std::cout << std::string(depth*2, ' '); 
 

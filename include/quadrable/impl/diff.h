@@ -49,8 +49,8 @@ void diffWalk(lmdb::txn &txn, uint64_t nodeId, std::function<void(ParsedNode &)>
 void diffAux(lmdb::txn &txn, uint64_t nodeIdA, uint64_t nodeIdB, std::vector<Diff> &output) {
     if (nodeIdA == nodeIdB) return;
 
-    ParsedNode nodeA(txn, dbi_node, nodeIdA);
-    ParsedNode nodeB(txn, dbi_node, nodeIdB);
+    ParsedNode nodeA(this, txn, nodeIdA);
+    ParsedNode nodeB(this, txn, nodeIdB);
 
     if (nodeA.isWitnessAny() || nodeB.isWitnessAny()) throw quaderr("encountered witness during diff");
 

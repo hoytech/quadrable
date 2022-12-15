@@ -12,7 +12,7 @@ void walkTree(lmdb::txn &txn, uint64_t nodeId, std::function<bool(ParsedNode &, 
 private:
 
 void walkTreeAux(lmdb::txn &txn, std::function<bool(ParsedNode &, uint64_t)> cb, uint64_t nodeId, uint64_t depth) {
-    ParsedNode node(txn, dbi_node, nodeId);
+    ParsedNode node(this, txn, nodeId);
 
     if (node.isEmpty()) return;
 

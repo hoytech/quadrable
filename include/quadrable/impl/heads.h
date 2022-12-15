@@ -16,7 +16,7 @@ std::string root(lmdb::txn &txn) {
 }
 
 std::string root(lmdb::txn &txn, uint64_t nodeId) {
-    ParsedNode node(txn, dbi_node, nodeId);
+    ParsedNode node(this, txn, nodeId);
 
     return std::string(node.nodeHash());
 }
@@ -28,7 +28,7 @@ Key rootKey(lmdb::txn &txn) {
 }
 
 Key rootKey(lmdb::txn &txn, uint64_t nodeId) {
-    ParsedNode node(txn, dbi_node, nodeId);
+    ParsedNode node(this, txn, nodeId);
 
     return Key::existing(node.nodeHash());
 }

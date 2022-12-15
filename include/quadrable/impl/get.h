@@ -78,7 +78,7 @@ void getMultiAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, GetMultiIntern
         return;
     }
 
-    ParsedNode node(txn, dbi_node, nodeId);
+    ParsedNode node(this, txn, nodeId);
 
     if (node.isEmpty()) {
         for (auto i = begin; i != end; ++i) {
