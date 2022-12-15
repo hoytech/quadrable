@@ -18,7 +18,7 @@ class ParsedNode {
             return;
         }
 
-        if (!db->dbi_node.get(txn, lmdb::to_sv<uint64_t>(nodeId), raw)) throw quaderr("couldn't find nodeId ", nodeId);
+        if (!db->getNode(txn, nodeId, raw)) throw quaderr("couldn't find nodeId ", nodeId);
 
         if (raw.size() < 8) throw quaderr("invalid node, too short");
 

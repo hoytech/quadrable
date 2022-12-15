@@ -1279,6 +1279,31 @@ void doTests() {
     });
 
 
+    test("memStore", [&]{
+        MemStore m;
+
+        db.withMemStore(m, [&]{
+            db.checkout();
+
+            db.change()
+              .put("A", "res1")
+              .put("B", "res2")
+              .apply(txn);
+
+            verify(db.getHeadNodeId(txn) >= firstMemStoreNodeId);
+
+            std::string_view val;
+            verify(db.get(txn, "A", val));
+            verify(val == "res1");
+            verify(db.get(txn, "B", val));
+            verify(val == "res2");
+
+            auto stats = db.stats(txn);
+            verify(stats.numLeafNodes == 2);
+        });
+    });
+
+
 
     txn.abort();
 
