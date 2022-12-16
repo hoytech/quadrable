@@ -32,8 +32,8 @@ class Sync {
     Quadrable *db;
     uint64_t nodeIdLocal;
     uint64_t nodeIdShadow;
-    uint64_t initialRequestDepth = 4;
-    uint64_t laterRequestDepth = 4;
+    uint64_t initialDepthLimit = 4;
+    uint64_t laterDepthLimit = 4;
 
   private:
     bool inited = false;
@@ -52,7 +52,7 @@ class Sync {
             return { SyncRequest{
                 Key::null(),
                 0,
-                initialRequestDepth,
+                initialDepthLimit,
                 false,
             } };
         }
@@ -164,7 +164,7 @@ class Sync {
             output.emplace_back(SyncRequest{
                 currPath,
                 depth,
-                laterRequestDepth,
+                laterDepthLimit,
                 false,
             });
 
