@@ -25,6 +25,9 @@ Quadrable is an authenticated multi-version database that can efficiently sync i
   * [Commands](#commands)
   * [Proof encodings](#proof-encodings)
 * [Syncing](#syncing)
+  * [Algorithm](#algorithm)
+  * [bytesBudget](#bytesbudget)
+  * [Pruned Trees](#pruned-trees)
 * [Integer Keys](#integer-keys)
   * [Logs](#logs)
   * [Proof Ranges](#proof-ranges)
@@ -482,7 +485,23 @@ After the syncer has constructed the shadow copy of the provider's tree, it can 
 * Merge: For all leaves that exist in the shadow tree but not locally, insert into the local tree. For any modified values, replace if their timestamp is newer than the local version. This implements a G-Set (grow-only) delta-state CRDT.
 * Other arbitrary logic: The syncer effectively has the full copies of both trees, so any sort of diff/patching algorithm can be applied.
 
+### Depth Limits
+
+When syncing, there is a trade-off between bandwith used and number of round-trips. In the degenerate case, the provider could simply send the entire tree when queried. This would only require a single round-trip, however much unnecessary data would be transferred if the trees share structure.
+
+At the other end of the spectrum, each request could specify a depth limit of 1. A larger depth limit results in transferring unnecessary witnesses, but reduces the number of round-trips needed. But since witnesses are small, it makes sense to speculatively pre-load witnesses in the event they are needed. By default the depth limits for both the initial and later requests are set to `4`, but these can be changed:
+
+    Quadrable::Sync sync(&db, txn, origNodeId);
+    sync.initialDepthLimit = 6;
+    sync.laterDepthLimit = 5;
+
+The depth limit of 4 seems to be a good balance for most applications. One of the advantages of using a binary merkle tree is we have as granular control over the speculative pre-load level as is possible. In trees with larger branching factor, you are obligated to use a larger "depth limit" than might otherwise be optimal.
+
 ### bytesBudget
+
+When dealing with large and highly divergent trees, the request and response sizes can become very large. Sometimes this is not desirable because the transport used has message/buffer size restrictions. Furthermore, very large messages can reduce the effectiveness of back-pressure.
+
+
 
 ### Pruned Trees
 
