@@ -27,8 +27,8 @@ R"(
       quadb [options] del [--int] [--] <key>
       quadb [options] get [--int] [--] <key>
       quadb [options] length
-      quadb [options] export [--sep=<sep>]
-      quadb [options] import [--sep=<sep>]
+      quadb [options] export [--sep=<sep>] [--int]
+      quadb [options] import [--sep=<sep>] [--int]
       quadb [options] root
       quadb [options] stats
       quadb [options] status
@@ -236,12 +236,14 @@ void run(int argc, char **argv) {
         std::string sep = ",";
         if (args["--sep"]) sep = args["--sep"].asString();
 
-        db.walkTree(txn, [&](Quadrable::ParsedNode &node, uint64_t depth){
+        db.walkTree(txn, [&](quadrable::Quadrable::ParsedNode &node, uint64_t depth){
             if (!node.isLeaf()) return true;
 
             std::string_view leafKey;
             if (db.getLeafKey(txn, node.nodeId, leafKey)) {
                 std::cout << leafKey;
+            } else if (args["--int"].asBool()) {
+                std::cout << node.key().toInteger();
             } else {
                 std::cout << quadrable::renderUnknown(node.leafKeyHash());
             }
@@ -267,7 +269,10 @@ void run(int argc, char **argv) {
         while (std::getline(std::cin, line)) {
             size_t delimOffset = line.find(sep);
             if (delimOffset == std::string::npos) throw quaderr("couldn't find separator in input line");
-            changes.put(line.substr(0, delimOffset), line.substr(delimOffset + sep.size()));
+            auto k = line.substr(0, delimOffset);
+            auto v = line.substr(delimOffset + sep.size());
+            if (args["--int"].asBool()) changes.put(quadrable::Key::fromInteger(std::stoi(k)), v);
+            else changes.put(k, v);
         }
 
         changes.apply(txn);
@@ -377,13 +382,23 @@ void run(int argc, char **argv) {
             }
         }
 
-        std::vector<std::string> keys;
+        if (args["--int"].asBool()) {
+            std::vector<quadrable::Key> keys;
 
-        for (auto &key : keysOrig) {
-            keys.push_back(key);
+            for (auto &key : keysOrig) {
+                keys.push_back(quadrable::Key::fromInteger(std::stoi(key)));
+            }
+
+            proof = db.exportProofRaw(txn, keys);
+        } else {
+            std::vector<std::string> keys;
+
+            for (auto &key : keysOrig) {
+                keys.push_back(key);
+            }
+
+            proof = db.exportProof(txn, keys);
         }
-
-        proof = db.exportProof(txn, keys);
 
         std::string format = "HashedKeys";
         if (args["--format"]) format = args["--format"].asString();
