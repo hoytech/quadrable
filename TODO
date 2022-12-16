@@ -3,9 +3,10 @@ next
   try flatmaps instead of std::map
   separate interior and leaf nodes into their own DBs to reduce fragmentation caused by uneven-sized leaf nodes
     * also normalise interior node size
+  method to copy a MemStore tree into LMDB
   sync
     bytesBudget
-    docs
+    docs, benchmarks
     sync to/from pruned trees
 
 lib
@@ -18,5 +19,5 @@ lib
   - de-dup trees using diff functionality
 
   ? changeable hash function
-  ? ability to compact tree to ensure nodeIds are sequential
-  ? ability to set resource limits on proof sizes when verifying (setMaxProofCmds?)
+  ? compact tree to ensure nodeIds are sequential
+  ? resource limits on proof sizes when verifying (setMaxProofCmds?)

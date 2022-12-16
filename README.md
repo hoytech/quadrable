@@ -76,7 +76,7 @@ Quadrable is a [Log Periodic](https://logperiodic.com) project.
 
 ### Dependencies
 
-The [LMDB](https://symas.com/lmdb/) and BLAKE2 libraries and header files are required. On Ubuntu/Debian run this:
+The [LMDB](https://symas.com/lmdb/) and [BLAKE2](https://www.blake2.net/) libraries and header files are required. On Ubuntu/Debian run this:
 
     sudo apt install -y liblmdb-dev libb2-dev
 
@@ -161,7 +161,7 @@ Because of the pre-image resistance property of our hash function, it is computa
 
 The purpose of these changes is to make empty sub-trees at all depths have 32 zero bytes as their nodeHashes. This includes the root node, so a totally empty tree will have a root of 32 zeros. This is desirable because:
 
-* The code is slightly simpler.
+* The code is simpler.
 * All-zero roots are user-friendly: It's easy to recognize an empty tree.
 * A run of zeros will compress better, so if empty tree roots are transmitted frequently as a degenerate case in some protocol, it may help for them to be all zeros.
 
@@ -324,7 +324,7 @@ Witness leaves are like regular proof-of-inclusion leaves except that a hash of 
 
 ![](docs/strands1.svg)
 
-Quadrable's proof structure uses a concept of "strands". This allows us to reduce the proof size when multiple records (inclusion or non-inclusion) are to be proved from the same DB. It is similar to the [authentication octopus algorithm](https://eprint.iacr.org/2017/933.pdf), except that the tentacles can be different lengths which is necessary for our [collapsed leaves](#collapsed-leaves) optimisation. Also, it doesn't necessarily work on all the strands from the bottom up (this is up to the proof encoder, which usually works on one strand as much as possible before switching to another).
+Quadrable's proof structure uses a concept of "strands". This allows us to reduce the proof size when multiple records (inclusion or non-inclusion) are to be proved from the same DB. It is similar to the [authentication octopus algorithm](https://eprint.iacr.org/2017/933.pdf), except that the tentacles can be different lengths which is necessary for our [collapsed leaves](#collapsed-leaves) optimisation. Also, it doesn't typically work on all the strands from the bottom up (this is up to the proof encoder, which usually works on one strand as much as possible before switching to another).
 
 The algorithm isn't necessarily optimal, but it seems to result in fairly compact proofs which can be shrunk further with extra proof-time optimisations. Additionally, the proofs can be processed with a single pass in resource-constrained environments such as smart contracts. After processing a proof, you end up with a ready-to-use partial-tree.
 
@@ -461,7 +461,7 @@ If the most significant bit is `1` in a command byte, it is a jump:
 
 Proofs allow us to export a useful portion of the tree and transmit it to a remote entity who can then perform operations on it, or compare it against one of their trees. Any shared structure between the trees is immediately obvious because the hashes of their highest shared nodes will match.
 
-In addition to creating proofs for particular keys or ranges of keys, Quadrable also provides a "sync" operation that is to be used when you don't know the set of keys that you want to prove. Rather than using a depth-first traversal when creating a proof, sync does a breadth-first traversal limited to a particular depth, and proves the existence of any witnesses at that depth. This "proof fragment" is then transmitted to the remote entity, who imports the proof and then compares this against their own version of the tree. Any reconstructed witnesses that match the local nodes indicate that the corresponding sub-trees are identical.
+In addition to creating proofs for particular keys or ranges of keys, Quadrable also provides a "sync" operation that is to be used when you don't know the set of keys that you want a proof for. Rather than using a depth-first traversal when creating a proof, sync does a breadth-first traversal limited to a particular depth, and proves the existence of any witnesses at that depth. This "proof fragment" is then transmitted to the remote entity, who imports the proof and then compares this against their own version of the tree. Any reconstructed witnesses that match the local nodes indicate that the corresponding sub-trees are identical.
 
 However, any differences in the node hashes between the reconstructed and local tree indicates that more proof fragments need to be retrieved. The remote node will then create a list of "sync requests", which are essentially compressed paths through the tree that the requester wishes to learn more about. Your node would then build "sync responses" to these requests, each of which is another proof fragment created by a depth-limited breadth-first search. However, each fragment's "root" node is actually the node at the compressed path location described in the request.
 
@@ -507,11 +507,11 @@ By contrast, if the keys are at random locations in the tree as per their hash v
 
 ### Proof Ranges
 
-When using integer keys, or other sequential key encoding, there is a large efficiency advantage to creating proofs of adjacent elements, as demonstrated in the previous section.
+When using integer keys, or other sequential key encodings, there is an efficiency advantage to creating proofs of adjacent elements, as demonstrated in the previous section.
 
 Because of this, Quadrable provides a special method to create proofs of a range of keys (`exportProofRange()`). Such proofs will prove the presence of all keys that exist in this range, and prove the non-presence of all keys in this range that do not exist.
 
-The same effect can be achieved by iterating over each in a tree and adding it to a set of elements and then creating a proof normally, but explicitly exporting a range is much more efficient. Additionally, the proof range export methods support specifying a depth limit, which is the mechanism behind the [syncing](#syncing) functionality.
+The same effect can be achieved by iterating over each in a tree and adding it to a set of elements and then creating a proof normally, but explicitly exporting a range is more efficient. Additionally, the proof range export methods support specifying a depth limit, which is the mechanism behind the [syncing](#syncing) functionality.
 
 
 
@@ -1033,7 +1033,7 @@ When you are finished with a MemStore, it can be destroyed like so:
 
     db.removeMemStore();
 
-The above described the "owning" interface for MemStores. There is also a non-owning interface that lets you manage MemStores lifetimes separately from the Quadrable instance:
+The above described the "owning" interface for MemStores. There is also a non-owning interface that lets you manage MemStore lifetimes separately from the Quadrable instance:
 
     quadrable::MemStore m;
 
