@@ -1009,6 +1009,41 @@ In order to iterate in reverse, the third argument to `db.iterate()` should be `
 * Note: iterators should be discarded at the end of an LMDB transaction, or after any write operations are performed within this transaction.
 
 
+### MemStore
+
+While normally nodes are written into the LMDB persistent storage, in some situations it is desirable to write them into a volatile (non-persistent) memory structure. When possible, doing so can be considerably faster and reduce DB fragmentation and disk IO. Most importantly, this can be done without holding LMDB's exclusive write lock.
+
+Quadrable implements a hybrid and optional in-memory storage layer called MemStore. If a MemStore is added to the Quadrable instance, nodes will be written into the MemStore when its `writeToMemStore` boolean member is set to true.
+
+If desired (perhaps because you're running on a machine with no write-access to any filesystem), Quadrable can be used entirely in-memory (without even configuring LMDB) like so:
+
+    quadrable::Quadrable db;
+    db.addMemStore();
+    db.writeToMemStore = true;
+    lmdb::txn txn(nullptr); // stub txn
+    db.checkout(); // detached head
+
+As long as you only use detached heads, you can get, put, import proofs, export proofs, and perform almost all Quadrable operations as though you had a backing LMDB instance.
+
+However, this is not the primary use-case for MemStore. Usually it is best used in conjunction with the DB, using read-only transactions. In this mode, it is possible to fork from a tree in the DB, make alterations, merge proofs, etc, all without needing to acquire the LMDB write lock. See the `"memStore forking from lmdb"` test for an example.
+
+Note that while MemStore nodes can refer to nodes in the DB, the opposite is not true and an error will be thrown if this is attempted.
+
+When you are finished with a MemStore, it can be destroyed like so:
+
+    db.removeMemStore();
+
+The above described the "owning" interface for MemStores. There is also a non-owning interface that lets you manage MemStores lifetimes separately from the Quadrable instance:
+
+    quadrable::MemStore m;
+
+    db.withMemStore(m, [&]{
+        // ... use the MemStore here
+    });
+
+    // MemStore uninstalled here
+
+
 ### Exporting/Importing Proofs
 
 The `exportProof` function creates inclusion/non-inclusion proofs for the specified keys. You can then use the `encodeProof` function to encode it to the compact external representation:
@@ -1033,7 +1068,7 @@ In order to prove integer keys, or keys created manually, use the `exportProofRa
 
     auto proof = db.exportProofRaw(txn, { quadrable::Key::fromInteger(100), });
 
-### Exporting Proof Ranges
+#### Exporting Proof Ranges
 
 As described in [Proof Ranges](#proof-ranges), it is possible to export a range of keys instead of a specific list. This is done with the `exportProofRange` method:
 
