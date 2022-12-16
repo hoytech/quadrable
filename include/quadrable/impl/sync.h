@@ -1,7 +1,8 @@
 public:
 
 
-SyncResponses handleSyncRequests(lmdb::txn &txn, uint64_t nodeId, SyncRequests &reqs, uint64_t bytesBudget) {
+SyncResponses handleSyncRequests(lmdb::txn &txn, uint64_t nodeId, SyncRequests &reqs, uint64_t bytesBudget = std::numeric_limits<uint64_t>::max()) {
+    if (bytesBudget == 0) throw quaderr("bytesBudget can't be 0");
     if (reqs.size() == 0) throw quaderr("empty fragments request");
 
     for (size_t i = 1; i < reqs.size() - 1; i++) {
@@ -11,7 +12,7 @@ SyncResponses handleSyncRequests(lmdb::txn &txn, uint64_t nodeId, SyncRequests &
     SyncResponses resps;
     Key currPath = Key::null();
 
-    handleSyncRequestsAux(txn, 0, nodeId, 0, currPath, reqs.begin(), reqs.end(), resps);
+    handleSyncRequestsAux(txn, 0, nodeId, 0, currPath, reqs.begin(), reqs.end(), resps, bytesBudget);
 
     return resps;
 }
@@ -29,26 +30,40 @@ using SyncedDiffCb = std::function<void(DiffType, const ParsedNode &)>;
 class Sync {
   public:
     Quadrable *db;
-    uint64_t nodeIdOurs;
+    uint64_t nodeIdLocal;
     uint64_t nodeIdShadow;
-    bool inited = false;
+    uint64_t initialRequestDepth = 4;
+    uint64_t laterRequestDepth = 4;
 
-    Sync(Quadrable *db_, lmdb::txn &txn, uint64_t nodeIdOurs_) : db(db_), nodeIdOurs(nodeIdOurs_) {
+  private:
+    bool inited = false;
+    std::unordered_set<uint64_t> finishedNodes;
+
+  public:
+    Sync(Quadrable *db_, lmdb::txn &txn, uint64_t nodeIdLocal_) : db(db_), nodeIdLocal(nodeIdLocal_) {
         auto node = BuiltNode::newWitness(db, txn, Key::null()); // initial stub node
         nodeIdShadow = node.nodeId;
     }
 
-    SyncRequests getReqs(lmdb::txn &txn) {
+    SyncRequests getReqs(lmdb::txn &txn, uint64_t bytesBudget = std::numeric_limits<uint64_t>::max()) {
+        if (bytesBudget == 0) throw quaderr("bytesBudget can't be 0");
+
         if (!inited) {
             return { SyncRequest{
                 Key::null(),
                 0,
-                4,
+                initialRequestDepth,
                 false,
             } };
         }
 
-        return db->reconcileTrees(txn, nodeIdOurs, nodeIdShadow);
+        SyncRequests output;
+
+        Key currPath = Key::null();
+
+        reconcileTrees(txn, nodeIdLocal, nodeIdShadow, 0, currPath, bytesBudget, output);
+
+        return output;
     }
 
     void addResps(lmdb::txn &txn, SyncRequests &reqs, SyncResponses &resps) {
@@ -101,7 +116,7 @@ class Sync {
         }
     }
 
-    private:
+  private:
 
     void diffAux(lmdb::txn &txn, uint64_t nodeId, ParsedNode &searchNode, ParsedNode &found, DiffType dt, const SyncedDiffCb &cb) {
         ParsedNode node(db, txn, nodeId);
@@ -114,6 +129,49 @@ class Sync {
             else if (node.nodeId != 0) cb(dt, node);
         }
     }
+
+    void reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, uint64_t &bytesBudget, SyncRequests &output) {
+        ParsedNode nodeOurs(db, txn, nodeIdOurs);
+        ParsedNode nodeTheirs(db, txn, nodeIdTheirs);
+
+        if (nodeOurs.nodeHash() == nodeTheirs.nodeHash() || finishedNodes.count(nodeIdOurs) || bytesBudget == 0) return;
+
+        auto reduceBytesBudget = [&]{
+            uint64_t estimate = 16;
+            if (bytesBudget > estimate) bytesBudget -= estimate;
+            else bytesBudget = 0;
+        };
+
+        if (nodeTheirs.isBranch()) {
+            uint64_t outputSizeBefore = output.size();
+
+            reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.leftNodeId : nodeIdOurs, nodeTheirs.leftNodeId, depth+1, currPath, bytesBudget, output);
+            currPath.setBit(depth, 1);
+            reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.rightNodeId : nodeIdOurs, nodeTheirs.rightNodeId, depth+1, currPath, bytesBudget, output);
+            currPath.setBit(depth, 0);
+
+            if (output.size() == outputSizeBefore && nodeIdOurs) finishedNodes.insert(nodeIdOurs);
+        } else if (nodeTheirs.isWitnessLeaf()) {
+            output.emplace_back(SyncRequest{
+                currPath,
+                depth,
+                1,
+                true,
+            });
+
+            reduceBytesBudget();
+        } else if (nodeTheirs.isWitness()) {
+            output.emplace_back(SyncRequest{
+                currPath,
+                depth,
+                laterRequestDepth,
+                false,
+            });
+
+            reduceBytesBudget();
+        }
+    }
+
 };
 
 
@@ -121,8 +179,8 @@ class Sync {
 private:
 
 
-void handleSyncRequestsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, Key &currPath, SyncRequests::iterator begin, SyncRequests::iterator end, SyncResponses &resps) {
-    if (begin == end) {
+void handleSyncRequestsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64_t parentNodeId, Key &currPath, SyncRequests::iterator begin, SyncRequests::iterator end, SyncResponses &resps, uint64_t &bytesBudget) {
+    if (begin == end || bytesBudget == 0) {
         return;
     }
 
@@ -134,6 +192,9 @@ void handleSyncRequestsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint
 
     if (begin != end && std::next(begin) == end && begin->startDepth == depth) {
         resps.emplace_back(exportProofFragment(txn, nodeId, currPath, *begin));
+        uint64_t estimate = estimateSizeProof(resps.back());
+        if (bytesBudget > estimate) bytesBudget -= estimate;
+        else bytesBudget = 0;
         return;
     }
 
@@ -144,12 +205,12 @@ void handleSyncRequestsAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint
         assertDepth(depth);
 
         if (node.leftNodeId || middle == end) {
-            handleSyncRequestsAux(txn, depth+1, node.leftNodeId, nodeId, currPath, begin, middle, resps);
+            handleSyncRequestsAux(txn, depth+1, node.leftNodeId, nodeId, currPath, begin, middle, resps, bytesBudget);
         }
 
         if (node.rightNodeId || begin == middle) {
             currPath.setBit(depth, 1);
-            handleSyncRequestsAux(txn, depth+1, node.rightNodeId, nodeId, currPath, middle, end, resps);
+            handleSyncRequestsAux(txn, depth+1, node.rightNodeId, nodeId, currPath, middle, end, resps, bytesBudget);
             currPath.setBit(depth, 0);
         }
     } else {
@@ -246,40 +307,23 @@ BuiltNode importSyncResponsesAux(lmdb::txn &txn, uint64_t nodeId, uint64_t depth
 
 
 
-SyncRequests reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs) {
-    SyncRequests output;
 
-    Key currPath = Key::null();
 
-    reconcileTreesAux(txn, nodeIdOurs, nodeIdTheirs, 0, currPath, output);
+uint64_t estimateSizeProof(const Proof &proof) {
+    uint64_t output = 0;
+
+    output += proof.strands.size() * 10;
+
+    for (const auto &strand : proof.strands) {
+        output += strand.val.size();
+        output += strand.key.size();
+    }
+
+    output += proof.cmds.size();
+
+    for (const auto &cmd : proof.cmds) {
+        if (cmd.op == ProofCmd::Op::HashProvided) output += 32;
+    }
 
     return output;
-}
-
-void reconcileTreesAux(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, SyncRequests &output) {
-    ParsedNode nodeOurs(this, txn, nodeIdOurs);
-    ParsedNode nodeTheirs(this, txn, nodeIdTheirs);
-
-    if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
-
-    if (nodeTheirs.isBranch()) {
-        reconcileTreesAux(txn, nodeOurs.isBranch() ? nodeOurs.leftNodeId : nodeIdOurs, nodeTheirs.leftNodeId, depth+1, currPath, output);
-        currPath.setBit(depth, 1);
-        reconcileTreesAux(txn, nodeOurs.isBranch() ? nodeOurs.rightNodeId : nodeIdOurs, nodeTheirs.rightNodeId, depth+1, currPath, output);
-        currPath.setBit(depth, 0);
-    } else if (nodeTheirs.isWitnessLeaf()) {
-        output.emplace_back(SyncRequest{
-            currPath,
-            depth,
-            1,
-            true,
-        });
-    } else if (nodeTheirs.isWitness()) {
-        output.emplace_back(SyncRequest{
-            currPath,
-            depth,
-            4,
-            false,
-        });
-    }
 }

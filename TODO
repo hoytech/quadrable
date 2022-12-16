@@ -5,11 +5,9 @@ next
     * also normalise interior node size
   method to copy a MemStore tree into LMDB
   sync
-    bytesBudget
-    docs, benchmarks
     sync to/from pruned trees
-    optimisation: in reconcile, don't recurse into sub-trees we have already confirmed are complete
     ability to copy a shadow tree into LMDB, expanding witnesses
+    docs, benchmarks
 
 lib
   ! tests for diff and mergeProof

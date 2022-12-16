@@ -1345,7 +1345,7 @@ void doTests() {
                 auto reqs = syncRequestsRoundtrip(sync.getReqs(txn));
                 if (reqs.size() == 0) break;
 
-                auto resps = syncResponsesRoundtrip(db.handleSyncRequests(txn, newNodeId, reqs, 0));
+                auto resps = syncResponsesRoundtrip(db.handleSyncRequests(txn, newNodeId, reqs));
                 sync.addResps(txn, reqs, resps);
             }
 
