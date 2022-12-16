@@ -3,14 +3,13 @@ public:
 void addMemStore(bool _writeToMemStore = true) {
     memStore = new MemStore;
     memStoreOwned = true;
-    writeToMemStore = _writeToMemStore;
 }
 
 void removeMemStore() {
     if (!memStoreOwned) throw quaderr("can't remove non-owned MemStore");
     delete memStore;
     memStore = nullptr;
-    memStoreOwned = writeToMemStore = false;
+    memStoreOwned = false;
 }
 
 void withMemStore(MemStore &m, std::function<void()> cb) {
@@ -28,13 +27,11 @@ struct MemStoreGuard {
         if (db->memStore) throw quaderr("memStore already installed");
 
         db->memStore = &m;
-        db->writeToMemStore = true;
     }
 
     ~MemStoreGuard() {
         db->memStore->headNodeId = db->detachedHeadNodeId;
 
         db->memStore = nullptr;
-        db->writeToMemStore = false;
     }
 };

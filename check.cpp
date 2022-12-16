@@ -1205,6 +1205,7 @@ void doTests() {
 
         db.withMemStore(m, [&]{
             db.checkout();
+            db.writeToMemStore = true;
 
             db.change()
               .put("A", "res1")
@@ -1222,6 +1223,8 @@ void doTests() {
             auto stats = db.stats(txn);
             verify(stats.numLeafNodes == 2);
         });
+
+        db.writeToMemStore = false;
     });
 
     test("memStore forking from lmdb", [&]{
@@ -1238,6 +1241,7 @@ void doTests() {
 
         db.withMemStore(m, [&]{
             db.checkout("memStore-test");
+            db.writeToMemStore = true;
 
             verifyThrow(db.change().put("C", "res3").apply(txn), "attempted to store MemStore node into LMDB");
 
@@ -1258,6 +1262,8 @@ void doTests() {
             verify(stats.numLeafNodes == 3);
         });
 
+        db.writeToMemStore = false;
+
         db.checkout(origNode);
 
         auto stats = db.stats(txn);
@@ -1267,6 +1273,7 @@ void doTests() {
     test("memStore-only env", [&]{
         quadrable::Quadrable db2;
         db2.addMemStore();
+        db2.writeToMemStore = true;
         lmdb::txn txn2(nullptr);
 
         db2.checkout();
@@ -1332,6 +1339,7 @@ void doTests() {
             Quadrable::Sync sync(&db, txn, origNodeId);
 
             db.addMemStore();
+            db.writeToMemStore = true;
 
             while(1) {
                 auto reqs = syncRequestsRoundtrip(sync.getReqs(txn));
