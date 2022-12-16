@@ -26,7 +26,7 @@ Quadrable is an authenticated multi-version database that can efficiently sync i
   * [Proof encodings](#proof-encodings)
 * [Syncing](#syncing)
 * [Integer Keys](#integer-keys)
-  * [Pushable Logs](#pushable-logs)
+  * [Logs](#logs)
   * [Proof Ranges](#proof-ranges)
 * [Storage](#storage)
   * [Copy-On-Write](#copy-on-write)
@@ -42,10 +42,9 @@ Quadrable is an authenticated multi-version database that can efficiently sync i
   * [Character Encoding](#character-encoding)
   * [Managing Heads](#managing-heads)
   * [Operation Batching](#operation-batching)
-  * [Pushing](#pushing)
+  * [Iterators](#iterators)
   * [Exporting/Importing Proofs](#exporting/importing-proofs)
   * [Exporting Proof Ranges](#exporting-proof-ranges)
-  * [Iterators](#iterators)
   * [Sync class](#sync-class)
   * [Garbage Collection](#garbage-collection)
 * [Author and Copyright](#author-and-copyright)
@@ -426,7 +425,7 @@ Here is how each strand is encoded:
       [32 byte keyHash]
 
 * A varint is a BER (Binary Encoded Representation) "variable length integer". Specifically, it is the base 128 integer with the fewest possible digits, most significant digit first, with the most significant bit set on all but the last digit.
-* The "number of trailing 0s" fields affect the following keyHashes which allows keyHashes to take up less space if they have trailing 0 bytes. This is useful for [pushable logs](pushable-logs) since they use integer keys which are much shorter than hashes.
+* The "number of trailing 0s" fields affect the following keyHashes which allows keyHashes to take up less space if they have trailing 0 bytes. This is useful for [integer keys](integer-keys) since they are much shorter than hashes.
 * The strand types are as follows:
   * `0`: Leaf
   * `1`: Invalid
@@ -474,43 +473,37 @@ Quadrable includes a wrapper for efficiently using the sparse merkle tree with i
 
 ![](docs/integer-keys.svg)
 
-The key layout works by having a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits provide paths to the various sub-trees, and there is a special location that stores the next pushable index (`0xFC0000...`, or `1111110000...` in binary).
+The key layout works by having a sequence of sub-trees, each of which is twice as large as the previous. The top 6 bits provide paths to the various sub-trees.
 
 * The items are sorted in the tree by key. As well as allowing in-order iteration, proofs for adjacent keys becomes much smaller because of Quadrable's [combined proofs](#combined-proofs) algorithm.
 * Up to `2^64 - 3` items are supported.
 * If we start sequentially inserting at index 0, the average height of the tree grows as more elements are inserted, and trees aren't excessively deep when the number of items is small. An alternative approach might be to use the full 64-bits of an integer as a key (MSB first). Unfortunately, this would create a tree of depth 64 even with only 2 elements.
 
-### Pushable Logs
+### Logs
 
-A common use-case for integer keys is to maintain an appendable list, also known as a *log*. To append items you should use the `push` methods which will manage a special *next pushable index* field. This field contains an increasing integer that can be used to find the next index available to be pushed to, stored as a varint (same format as described [above](#external-representation)).
+A common use-case for integer keys is to maintain an appendable list, also known as a *log*. The keys are ordered, for example timestamps or sequence IDs.
 
-In order to create a proof that can be pushed onto, pass the `--pushable` flag to `quadb exportProof` (or set the `pushable` parameter of `exportProofInteger` to `true` in C++). This adds the following to the proof (in addition to any other indices you requested):
+In order to create non-hash keys, use the `quadrable::Key::fromInteger()` Key constructor. These keys can then be passed to `exportProofRaw`. If you want to create a proof that allows the recipient to add subsequent entries to the log, you should prove the inclusion of the largest element in your log. This can be determined with an [iterator](#iterators), for example like so:
 
-* An inclusion proof for the next pushable index field (or a non-inclusion if it's not yet set)
-* A non-inclusion proof for the value stored in the next pushable index field (or `0` if next pushable not yet set)
+    auto proof = db.exportProofRaw(txn, {
+        db.iterate(txn, quadrable::Key::max(), true).get().key(),
+    });
 
-Partial trees that are constructed from these proofs allow an unlimited number of elements to be appended (pushed). Do *not* use both integer keys and hashed keys in the same tree. If you do, then the pushable proofs may not contain enough information to push an unlimited number of elements.
-
-Pushable proofs are fairly compact. For example, a database with 1 million elements in it has a pushable proof of about 300 bytes:
-
-    $ quadb checkout
-    $ perl -E 'for $i (1..1_000_000) { say "value $i" }' | quadb push --stdin
-    $ quadb exportProof --pushable | wc -c
-    310
+Do *not* use both integer keys and hashed keys in the same tree. If you do, then the log may not contain enough information to push an unlimited number of elements.
 
 Because consecutive keys are often adjacent in the tree they can take good advantage of [combined proofs](#combined-proofs). This means that proofs for consecutive ranges of keys are also compact:
 
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --int --stdin | wc -c
-    18010
+    12978
 
-The values alone (`value 1000`, `value 1001`, ...) take up 10,000 bytes, meaning the proof and encoding overhead is around 8,000 bytes (8 bytes per item, *including* all sibling hashes). (We're using `--int` instead of `--pushable` to avoid the pushable overhead, but that's only another 200 bytes or so).
+The values alone (`value`, `value`, ...) take up 5,000 bytes, meaning the proof and encoding overhead is around 8,000 bytes (8 bytes per item, *including* all sibling hashes).
 
 By contrast, if the keys are at random locations in the tree as per their hash values, the proofs become much larger:
 
     $ quadb checkout
-    $ perl -E 'for $i (1..1_000_000) { say "$i,value $i" }' | quadb import
+    $ perl -E 'for $i (1..1_000_000) { say "$i,value" }' | quadb import
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --stdin | wc -c
-    349981
+    345508
 
 ### Proof Ranges
 
@@ -709,28 +702,6 @@ If we run `status` again, we can see the root has changed back to the all-zeros 
     Root: 0x0000000000000000000000000000000000000000000000000000000000000000 (0)
 
 This is an important property of Quadrable: Identical trees have identical roots. "Path dependencies" such as the order in which records were inserted, or whether any deletions or modifications occurred along the way, do not affect the resulting roots.
-
-#### quadb push
-
-This pushes a value into the database and updates the [next pushable index](#pushable-logs):
-
-    $ quadb push val
-
-The `--stdin` flag says to read the records from standard input, one per line:
-
-    $ perl -E 'for $i (1..1000) { say "value $i" }' | quadb push --stdin
-
-#### quadb length
-
-Prints out the number of records that have been [pushed](#pushable-logs) onto this database. This is the equivalent to the "next pushable index", or 0 if this has not been set
-
-    $ quadb length
-    1000
-    $ quadb push 'new record'
-    $ quadb length
-    1001
-
-Note that this should only be used if using [integer keys](#integer-keys). This value is *not* equivalent to the number of leaves in the tree. To get that number, use [quadb stats](#quadb-stats).
 
 #### quadb import
 
@@ -1016,51 +987,7 @@ If you are using [integer keys](#integer-keys) pass `uint64_t`s to get instead:
 
     std::string key1ValCopy(recs["key1"].val);
 
-### Pushing
 
-In order to push elements onto the database to implement a [pushable log](#pushable-logs), you can use the `push` method:
-
-    db.change()
-      .push(txn, "val1")
-      .push(txn, "val2")
-      .apply(txn);
-
-Note that unlike `.put()` and `.del()`, a transaction must be passed to `push`. This is because it needs to read the next pushable index from the database. The transaction must be the same as the one eventually passed to `apply`.
-
-
-### Exporting/Importing Proofs
-
-The `exportProof` function creates inclusion/non-inclusion proofs for the specified keys. You can then use the `encodeProof` function to encode it to the compact external representation:
-
-    auto proof = db.exportProof(txn, { "key1", "key2", });
-
-    std::string encodedProof = quadrable::transport::encodeProof(proof);
-
-The second argument to `exportProof` is a `std::set<std::string>` so you can build up the list of keys programmatically if you desire.
-
-The complement function is called `importProof`:
-
-    auto proof = quadrable::transport::decodeProof(encodedProof);
-
-    db.importProof(txn, proof, trustedRoot);
-
-If the resulting partial tree root does not match `trustedRoot` then an exception will be thrown and your head will not be altered. You can omit this argument to avoid this check, although be aware that you are importing an unverified proof if you do this.
-
-On success, your head will point to the partial tree resulting from the proof. Queries for the specified keys (`key1` and `key2`) will succeed (even if they are not in the database -- that is a non-inclusion proof), and queries for other keys will throw exceptions.
-
-In order to prove integer keys, you use the `exportProofInteger` method instead:
-
-    auto proof = db.exportProofInteger(txn, { 100, 101, 102, 103, }, true);
-
-If the third argument is true, the proof will create a [pushable](#pushable-logs) partial tree.
-
-### Exporting Proof Ranges
-
-As described in [Proof Ranges](#proof-ranges), it is possible to export a range of keys instead of a specific list. This is done with the `exportProofRange` method:
-
-    auto proof = db.exportProofRange(txn, quadrable::Key::fromInteger(100), quadrable::Key::fromInteger(200));
-
-Proofs exported as ranges are identical to regular proofs, so importing is done as usual, with `importProof()`.
 
 ### Iterators
 
@@ -1080,6 +1007,40 @@ In order to iterate in reverse, the third argument to `db.iterate()` should be `
     auto it = db.iterate(txn, quadrable::Key::fromInteger(200), true);
 
 * Note: iterators should be discarded at the end of an LMDB transaction, or after any write operations are performed within this transaction.
+
+
+### Exporting/Importing Proofs
+
+The `exportProof` function creates inclusion/non-inclusion proofs for the specified keys. You can then use the `encodeProof` function to encode it to the compact external representation:
+
+    auto proof = db.exportProof(txn, { "key1", "key2", });
+
+    std::string encodedProof = quadrable::transport::encodeProof(proof);
+
+The second argument to `exportProof` is a `std::vector<std::string>` so you can build up the list of keys programmatically if you desire.
+
+The complement function is called `importProof`:
+
+    auto proof = quadrable::transport::decodeProof(encodedProof);
+
+    db.importProof(txn, proof, trustedRoot);
+
+If the resulting partial tree root does not match `trustedRoot` then an exception will be thrown and your head will not be altered. You can omit this argument to avoid this check, although be aware that you are importing an unverified proof if you do this.
+
+On success, your head will point to the partial tree resulting from the proof. Queries for the specified keys (`key1` and `key2`) will succeed (even if they are not in the database -- that is a non-inclusion proof), and queries for other keys will throw exceptions.
+
+In order to prove integer keys, or keys created manually, use the `exportProofRaw` method instead:
+
+    auto proof = db.exportProofRaw(txn, { quadrable::Key::fromInteger(100), });
+
+### Exporting Proof Ranges
+
+As described in [Proof Ranges](#proof-ranges), it is possible to export a range of keys instead of a specific list. This is done with the `exportProofRange` method:
+
+    auto proof = db.exportProofRange(txn, quadrable::Key::fromInteger(100), quadrable::Key::fromInteger(200));
+
+Proofs exported as ranges are identical to regular proofs, so importing is done as usual, with `importProof()`.
+
 
 ### Sync class
 
