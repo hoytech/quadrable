@@ -3,10 +3,9 @@ next
   try flatmaps instead of std::map
   separate interior and leaf nodes into their own DBs to reduce fragmentation caused by uneven-sized leaf nodes
     * also normalise interior node size
-  in-memory backing store
-    * docs: way to avoid needing to store stuff in lmdb to validate a proof
   sync
     bytesBudget
+    docs
     sync to/from pruned trees
 
 lib
