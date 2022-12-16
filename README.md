@@ -459,11 +459,33 @@ If the most significant bit is `1` in a command byte, it is a jump:
 
 ## Syncing
 
-Proofs allow us to export a useful portion of the tree and transmit it to a remote entity who can then perform operations on it, or compare it against one of their trees. Any shared structure between the trees is immediately obvious because the hashes of their highest shared nodes will match.
+Proofs allow us to export a useful portion of the tree and transmit it to a remote entity who can then perform operations on it, or compare it against one of their trees. Any shared structure between the trees is immediately obvious because the hashes of their highest shared nodes will match. In addition to creating proofs for particular keys or ranges of keys, Quadrable also provides a "sync" operation that can be used when you don't know the set of keys that you want a proof for.
 
-In addition to creating proofs for particular keys or ranges of keys, Quadrable also provides a "sync" operation that is to be used when you don't know the set of keys that you want a proof for. Rather than using a depth-first traversal when creating a proof, sync does a breadth-first traversal limited to a particular depth, and proves the existence of any witnesses at that depth. This "proof fragment" is then transmitted to the remote entity, who imports the proof and then compares this against their own version of the tree. Any reconstructed witnesses that match the local nodes indicate that the corresponding sub-trees are identical.
+The sync protocol has two parties, a syncer and a provider. The syncer wishes to compare their version of a tree to the version held by the provider. The syncer maintains the state of the sync and passes requests to the provider, who replies with responses. The provider is stateless. Each one of these requests/response pairs is called a "round-trip", and the goal of the syncing algorithm is to minimise them, along with the total size in bytes of the requests and responses.
 
-However, any differences in the node hashes between the reconstructed and local tree indicates that more proof fragments need to be retrieved. The remote node will then create a list of "sync requests", which are essentially compressed paths through the tree that the requester wishes to learn more about. Your node would then build "sync responses" to these requests, each of which is another proof fragment created by a depth-limited breadth-first search. However, each fragment's "root" node is actually the node at the compressed path location described in the request.
+The goal of the sync algorithm is for the syncer to construct a "shadow" copy of the provider's tree. This shadow copy is typically stored in a [MemStore](#memstore) so that LMDB write locks don't need to be acquired. If the syncer and provider's trees share any structure, then this shadow tree will be smaller than the provider's tree, since shared sub-trees will be pruned to witness nodes.
+
+Normal Quadrable proofs are constructed using a depth-first traversal which dives deep enough to find each item to be proved. Instead, the sync algorithm does a breadth-first traversal limited to a particular depth in order to create a proof for the existence of any witnesses at that depth. A sync response is simply a list of these "proof fragments".
+
+### Algorithm
+
+1. The syncer creates an initial request, which queries for witnesses immediately below the root node limited to a depth, and sends this to the provider.
+2. The provider performs a breadth-first traversal of its tree, and creates a proof fragment for the witnesses at the specified depth. Note that branches with one item empty are *not* counted as increasing the depth, for the purpose of the depth limit (because such branches can be encoded very cheaply in the proof). The proof fragment is returned back to the syncer.
+3. The syncer creates a shadow copy of the provider's tree by importing the proof fragment.
+4. The syncer "reconciles" the shadow copy against its own tree, which means searching for sub-trees that are different and for witness leaves that need to be expanded. The path of each missing sub-tree or leaf is added to a list of sync requests. If the reconcilliation completes and the sync request is empty, the algorithm is finished. Otherwise, the sync requests are transferred to the provider.
+5. For each sync request, the provider creates another proof fragment of the specified depth. However, these proof fragments are run using the the specified path as the root node, instead of the main tree's root node. These proof fragments form a list, called the sync response, which is then returned to the syncer.
+6. Goto step 4.
+
+After the syncer has constructed the shadow copy of the provider's tree, it can then optionally incorporate values from this tree into its own. There are several options here:
+
+* Synchronisation: Simply use the shadow tree as the new value for the local tree by replacing witness nodes. This is a leader/follower configuration where the syncer is replicating the data from the provider.
+* Merge: For all leaves that exist in the shadow tree but not locally, insert into the local tree. For any modified values, replace if their timestamp is newer than the local version. This implements a G-Set (grow-only) delta-state CRDT.
+* Other arbitrary logic: The syncer effectively has the full copies of both trees, so any sort of diff/patching algorithm can be applied.
+
+### bytesBudget
+
+### Pruned Trees
+
 
 
 
