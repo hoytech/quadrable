@@ -87,7 +87,7 @@ const uint64_t firstMemStoreNodeId = 36028797018963968ULL; // 2**55
 
 struct MemStore {
     std::map<uint64_t, std::string> nodes;
-    uint64_t headNode;
+    uint64_t headNodeId = 0;
 };
 
 

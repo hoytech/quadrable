@@ -10,6 +10,7 @@ class Quadrable {
     lmdb::dbi dbi_node;
     lmdb::dbi dbi_key;
     bool trackKeys = false;
+    bool writeToMemStore = false;
 
   private:
 
@@ -17,12 +18,22 @@ class Quadrable {
     bool detachedHead = false;
     uint64_t detachedHeadNodeId = 0;
     MemStore *memStore = nullptr;
+    bool memStoreOwned = false;
 
   public:
 
     // Setup
 
-    Quadrable() {}
+    Quadrable() {
+    }
+
+    ~Quadrable() {
+        if (memStore && memStoreOwned) {
+            delete memStore;
+            memStore = nullptr;
+            memStoreOwned = writeToMemStore = false;
+        }
+    }
 
     void init(lmdb::txn &txn) {
         dbi_head = lmdb::dbi::open(txn, "quadrable_head", MDB_CREATE);

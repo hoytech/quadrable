@@ -1198,6 +1198,95 @@ void doTests() {
         verifyThrow(db.getRaw(txn, quadrable::Key::fromInteger(1).sv(), val), "incomplete tree");
     });
 
+
+
+    test("memStore basic", [&]{
+        MemStore m;
+
+        db.withMemStore(m, [&]{
+            db.checkout();
+
+            db.change()
+              .put("A", "res1")
+              .put("B", "res2")
+              .apply(txn);
+
+            verify(db.getHeadNodeId(txn) >= firstMemStoreNodeId);
+
+            std::string_view val;
+            verify(db.get(txn, "A", val));
+            verify(val == "res1");
+            verify(db.get(txn, "B", val));
+            verify(val == "res2");
+
+            auto stats = db.stats(txn);
+            verify(stats.numLeafNodes == 2);
+        });
+    });
+
+    test("memStore forking from lmdb", [&]{
+        MemStore m;
+
+        db.checkout("memStore-test");
+
+        db.change()
+          .put("A", "res1")
+          .put("B", "res2")
+          .apply(txn);
+
+        uint64_t origNode = db.getHeadNodeId(txn);
+
+        db.withMemStore(m, [&]{
+            db.checkout("memStore-test");
+
+            verifyThrow(db.change().put("C", "res3").apply(txn), "attempted to store MemStore node into LMDB");
+
+            db.fork(txn);
+            db.change().put("C", "res3").apply(txn);
+
+            verify(db.getHeadNodeId(txn) >= firstMemStoreNodeId);
+
+            std::string_view val;
+            verify(db.get(txn, "A", val));
+            verify(val == "res1");
+            verify(db.get(txn, "B", val));
+            verify(val == "res2");
+            verify(db.get(txn, "C", val));
+            verify(val == "res3");
+
+            auto stats = db.stats(txn);
+            verify(stats.numLeafNodes == 3);
+        });
+
+        db.checkout(origNode);
+
+        auto stats = db.stats(txn);
+        verify(stats.numLeafNodes == 2);
+    });
+
+    test("memStore-only env", [&]{
+        quadrable::Quadrable db2;
+        db2.addMemStore();
+        lmdb::txn txn2(nullptr);
+
+        db2.checkout();
+
+        db2.change()
+           .put("A", "res1")
+           .put("B", "res2")
+           .apply(txn2);
+
+        std::string_view val;
+        verify(db2.get(txn2, "A", val));
+        verify(val == "res1");
+        verify(db2.get(txn2, "B", val));
+
+        auto stats = db2.stats(txn2);
+        verify(stats.numLeafNodes == 2);
+    });
+
+
+
     test("sync fuzz", [&]{
         std::mt19937 rnd;
         rnd.seed(0);
@@ -1242,6 +1331,8 @@ void doTests() {
 
             Quadrable::Sync sync(&db, txn, origNodeId);
 
+            db.addMemStore();
+
             while(1) {
                 auto reqs = syncRequestsRoundtrip(sync.getReqs(txn));
                 if (reqs.size() == 0) break;
@@ -1249,6 +1340,8 @@ void doTests() {
                 auto resps = syncResponsesRoundtrip(db.handleSyncRequests(txn, newNodeId, reqs, 0));
                 sync.addResps(txn, reqs, resps);
             }
+
+            db.writeToMemStore = false;
 
             db.checkout(sync.nodeIdShadow);
             if (db.rootKey(txn) != newKey) throw quaderr("NOT EQUAL AFTER IMPORT");
@@ -1275,32 +1368,9 @@ void doTests() {
             auto reconstructedKey = db.rootKey(txn);
 
             verify(reconstructedKey == newKey);
+
+            db.removeMemStore();
         }
-    });
-
-
-    test("memStore", [&]{
-        MemStore m;
-
-        db.withMemStore(m, [&]{
-            db.checkout();
-
-            db.change()
-              .put("A", "res1")
-              .put("B", "res2")
-              .apply(txn);
-
-            verify(db.getHeadNodeId(txn) >= firstMemStoreNodeId);
-
-            std::string_view val;
-            verify(db.get(txn, "A", val));
-            verify(val == "res1");
-            verify(db.get(txn, "B", val));
-            verify(val == "res2");
-
-            auto stats = db.stats(txn);
-            verify(stats.numLeafNodes == 2);
-        });
     });
 
 

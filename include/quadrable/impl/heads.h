@@ -67,6 +67,7 @@ void setHeadNodeId(lmdb::txn &txn, uint64_t nodeId) {
     if (detachedHead) {
         detachedHeadNodeId = nodeId;
     } else {
+        if (nodeId >= firstMemStoreNodeId) throw quaderr("attempted to store MemStore node into LMDB");
         dbi_head.put(txn, head, lmdb::to_sv<uint64_t>(nodeId));
     }
 }

@@ -3,7 +3,8 @@ private:
 // Internal storage interface
 
 bool getNode(lmdb::txn &txn, uint64_t nodeId, std::string_view &output) {
-    if (memStore) {
+    if (nodeId >= firstMemStoreNodeId) {
+        if (!memStore) throw quaderr("tried to load MemStore node, but no MemStore attached");
         auto it = memStore->nodes.find(nodeId);
         if (it == memStore->nodes.end()) return false;
         output = it->second;
@@ -18,7 +19,9 @@ uint64_t writeNodeToDb(lmdb::txn &txn, std::string_view nodeRaw) {
 
     uint64_t newNodeId;
 
-    if (memStore) {
+    if (writeToMemStore) {
+        if (!memStore) throw quaderr("no MemStore configured");
+
         auto it = memStore->nodes.rbegin();
         if (it == memStore->nodes.rend()) newNodeId = firstMemStoreNodeId;
         else newNodeId = it->first + 1;
