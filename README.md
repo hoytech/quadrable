@@ -463,32 +463,32 @@ If the most significant bit is `1` in a command byte, it is a jump:
 
 ## Syncing
 
-Proofs allow us to export a useful portion of the tree and transmit it to a remote entity who can then perform operations on it, or compare it against one of their trees. Any shared structure between the trees is immediately obvious because the hashes of their highest shared nodes will match. In addition to creating proofs for particular keys or ranges of keys, Quadrable also provides a "sync" operation that can be used when you don't know the set of keys that you want a proof for.
+Proofs allow us to export a useful portion of the tree and transmit it to a remote entity who can then perform operations on it, or compare it against one of their own trees. Any shared structure between trees is immediately obvious because the hashes of their highest shared nodes will match. In addition to creating proofs for particular keys or ranges of keys, Quadrable also provides a "sync" operation that can be used when you don't know the set of keys that you want a proof for.
 
-The sync protocol has two parties, a syncer and a provider. The syncer wishes to compare their version of a tree to the version held by the provider. The syncer maintains the state of the sync and passes requests to the provider, who replies with responses. The provider is stateless. Each one of these requests/response pairs is called a "round-trip", and the goal of the syncing algorithm is to minimise them, along with the total size in bytes of the requests and responses.
+The sync protocol has two parties, a syncer and a provider. The syncer wishes to compare their version of a tree to the version held by the provider. The syncer maintains the state of the sync and passes requests to the provider, who replies with responses. The provider is stateless. Each one of these requests/response pairs is called a "round-trip", and the goal of the syncing algorithm is to minimise round-trips, along with the total size in bytes of the requests and responses.
 
-The goal of the sync algorithm is for the syncer to construct a "shadow" copy of the provider's tree. This shadow copy is typically stored in a [MemStore](#memstore) so that LMDB write locks don't need to be acquired. If the syncer and provider's trees share any structure, then this shadow tree will be smaller than the provider's tree, since shared sub-trees will be pruned to witness nodes.
+The end result of performing the sync algorithm is for the syncer to have constructed a "shadow" copy of the provider's tree. This shadow copy is typically stored in a [MemStore](#memstore) so that LMDB write locks don't need to be acquired. If the syncer and provider's trees share any structure, then this shadow tree will take up less space than the provider's tree, since shared sub-trees will be pruned to witness nodes.
 
-Normal Quadrable proofs are constructed using a depth-first traversal which dives deep enough to find each item to be proved. Instead, the sync algorithm does a breadth-first traversal limited to a particular depth in order to create a proof for the existence of any witnesses at that depth. A sync response is simply a list of these "proof fragments".
+Normal Quadrable proofs are constructed using a depth-first traversal which dives deep enough to find each item to be proved. Instead, the sync algorithm does a breadth-first traversal limited to a particular depth in order to create a proof for the existence of all witnesses at that depth. A sync response is simply a list of these "proof fragments".
 
 ### Algorithm
 
 1. The syncer creates an initial request, which queries for witnesses immediately below the root node limited to a depth, and sends this to the provider.
-2. The provider performs a breadth-first traversal of its tree, and creates a proof fragment for the witnesses at the specified depth. Note that branches with one item empty are *not* counted as increasing the depth, for the purpose of the depth limit (because such branches can be encoded very cheaply in the proof). The proof fragment is returned back to the syncer.
+2. The provider performs a breadth-first traversal of its tree, and creates a proof fragment for the witnesses at the specified depth. Note that for the purposes of the depth limit, a branch with one item empty is *not* counted towards increasing the depth (because such branches can be encoded very cheaply in the proof). The proof fragment is returned back to the syncer.
 3. The syncer creates a shadow copy of the provider's tree by importing the proof fragment.
-4. The syncer "reconciles" the shadow copy against its own tree, which means searching for sub-trees that are different and for witness leaves that need to be expanded. The path of each missing sub-tree or leaf is added to a list of sync requests. If the reconcilliation completes and the sync request is empty, the algorithm is finished. Otherwise, the sync requests are transferred to the provider.
+4. The syncer "reconciles" the shadow copy against its own tree, which means searching for sub-trees that are different and for witness leaves that need to be expanded. The path of each missing sub-tree or leaf is added to a list of sync requests. If the reconcilliation completes and the sync request list is empty, the algorithm is finished. Otherwise, the sync requests are transferred to the provider.
 5. For each sync request, the provider creates another proof fragment of the specified depth. However, these proof fragments are run using the the specified path as the root node, instead of the main tree's root node. These proof fragments form a list, called the sync response, which is then returned to the syncer.
 6. Goto step 4.
 
 After the syncer has constructed the shadow copy of the provider's tree, it can then optionally incorporate values from this tree into its own. There are several options here:
 
-* Synchronisation: Simply use the shadow tree as the new value for the local tree by replacing witness nodes. This is a leader/follower configuration where the syncer is replicating the data from the provider.
+* Synchronisation: Simply replace the local tree with the shadow tree (after expanding its witness nodes). This is a leader/follower configuration where the syncer is replicating the data from the provider.
 * Merge: For all leaves that exist in the shadow tree but not locally, insert into the local tree. For any modified values, replace if their timestamp is newer than the local version. This implements a G-Set (grow-only) delta-state CRDT.
-* Other arbitrary logic: The syncer effectively has the full copies of both trees, so any sort of diff/patching algorithm can be applied.
+* Other arbitrary logic: The syncer effectively has the full copies of both trees, so any sort of diffing/patching algorithm can be applied.
 
 ### Depth Limits
 
-When syncing, there is a trade-off between bandwith used and number of round-trips. In the degenerate case, the provider could simply send the entire tree when queried. This would only require a single round-trip, however much unnecessary data would be transferred if the trees share structure.
+When syncing, there is a trade-off between bandwith and round-trips. In the degenerate case, the provider could simply send the entire tree when queried. This would only require a single round-trip, however much unnecessary data would be transferred if the trees share structure.
 
 At the other end of the spectrum, each request could specify a depth limit of 1. A larger depth limit results in transferring unnecessary witnesses, but reduces the number of round-trips needed. But since witnesses are small, it makes sense to speculatively pre-load witnesses in the event they are needed. By default the depth limits for both the initial and later requests are set to `4`, but these can be changed:
 
@@ -500,20 +500,20 @@ The depth limit of 4 seems to be a good balance for most applications. One of th
 
 ### bytesBudget
 
-When dealing with large and highly divergent trees, the request and response sizes can become very large. Sometimes this is not desirable for various reasons:
+When dealing with large and highly divergent trees, the request and response sizes can become quite large. Sometimes this is not desirable:
 
 * The network transport used may have message size restrictions
 * Progress-bar type reporting becomes more difficult
 * Large buffers may need to be allocated in several places during transmission and reception
 * Even if it's possible with a particular network transport, Quadrable does not begin processing a request until the entire message has been received, reducing parallelism
 
-For these reasons, when creating requests and/or responses, a `bytesBudget` parameter can be specified. This limits the sizes of the requests/responses. Requests can be made smaller simply by requesting fewer items and waiting until a subsequent request comes before querying the remaining. Responses can be made smaller by not responding to all the items in a request. The syncer supports this, and will pick up any missing items in its next tree reconcilliation.
+For these reasons, when creating requests and/or responses, a `bytesBudget` parameter can be specified. This limits the sizes of the requests/responses. Requests can be made smaller simply by requesting fewer items and querying the rest later. Responses can be made smaller by not responding to all the items in a request. The syncer supports this, and will re-request any missing items in its next tree reconcilliation.
 
-Use of `bytesBudget` is itself a trade-off. It slightly increases bandwidth overhead but, more importantly, it also increases the number of round-trips.
+Use of `bytesBudget` does have some disadvantages: It slightly increases bandwidth overhead but, more importantly, it increases the number of round-trips.
 
-`bytesBudget` is not a hard guarantee, and message will often be smaller than this number. The encoded message sizes are estimated during processing, not computed exactly, and this estimation is in most cases conservative. Messages can also be larger than the `bytesBudget` when large leaf values are present, because the sync protocol does not yet support chunking values.
+`bytesBudget` is not a hard guarantee, and message will often be smaller than this number. The encoded message sizes are estimated during processing, not computed exactly, and this estimation is in most cases conservative. Messages can also be larger than the `bytesBudget` when large leaf values are present, because the sync protocol does not support chunking values.
 
-For trees that mostly contain short leaf values, with the default depth limits normal response sizes are typically about 10 times larger than the requests.
+For trees that mostly contain short leaf values, normal response sizes are typically about 10 times larger than the requests (with the default depth limits).
 
 The `syncBench.cpp` program can be used to experiment with different values for `bytesBudget`.
 
@@ -526,7 +526,7 @@ In addition to garbage collection which removes no-longer-needed nodes/leaves, Q
 Trees may be pruned in various circumstances:
 
 * An application may only be concerned with the most recent observations and would like to save storage space by not storing entries older than a certain time period. With pruning, this can be done without compromising the ability to interact with other entities, even if they have different retention policies.
-* Similarly, according to some application-level attribute, certain records may be no longer useful/needed (ie expired).
+* Similarly, according to some application-level attribute, certain records may be no longer useful/needed (expired, account deactivated, etc).
 * An application may wish to remove/censor a particular leaf value without compromising the ability to interact with other entities with differing policies.
 
 Quadrable's algorithms work to varying degrees when processing trees with witness nodes. As long as a witness node is not encountered during a traversal, everything works: gets, updates, proofs, etc. However there is still work to be done here to expose application-level control over the behaviour when witnesses *are* encountered.
@@ -553,7 +553,7 @@ The key layout works by having a sequence of sub-trees, each of which is twice a
 
 A common use-case for integer keys is to maintain an appendable list, also known as a *log*. The keys are ordered, for example timestamps or sequence IDs.
 
-In order to create non-hash keys, use the `quadrable::Key::fromInteger()` Key constructor. These keys can then be passed to `exportProofRaw`. If you want to create a proof that allows the recipient to add subsequent entries to the log, you should prove the inclusion of the largest element in your log. This can be determined with an [iterator](#iterators), for example like so:
+In order to create non-hash keys, use the `quadrable::Key::fromInteger()` Key constructor. These keys can then be passed to `exportProofRaw`. If you want to create a proof that allows the recipient to add subsequent entries to the log, you should prove the inclusion of the largest element in your log. This can be determined with an [iterator](#iterators) like so:
 
     auto proof = db.exportProofRaw(txn, {
         db.iterate(txn, quadrable::Key::max(), true).get().key(),
@@ -581,7 +581,7 @@ When using integer keys, or other sequential key encodings, there is an efficien
 
 Because of this, Quadrable provides a special method to create proofs of a range of keys (`exportProofRange()`). Such proofs will prove the presence of all keys that exist in this range, and prove the non-presence of all keys in this range that do not exist.
 
-The same effect can be achieved by iterating over each in a tree and adding it to a set of elements and then creating a proof normally, but explicitly exporting a range is more efficient. Additionally, the proof range export methods support specifying a depth limit, which is the mechanism behind the [syncing](#syncing) functionality.
+The same effect can be achieved by [iterating](#iterators) over a tree and adding each element to a set and then creating a proof normally, but explicitly exporting a range is more efficient. Additionally, the proof range export methods support specifying a depth limit, which is the mechanism behind the [syncing](#syncing) functionality.
 
 
 
@@ -641,15 +641,15 @@ Quadrable's C++ implementation uses the [Lightning Memory-mapped Database](https
 
 LMDB is a B+ tree database, unlike Log-Structured-Merge (LSM) databases such as LevelDB. Compared to LevelDB, LMDB has better read performance and uses the CPU more efficiently. It has instant recovery after a crash, suffers from less write amplification, offers real ACID transactions and multi-process access (in addition to multi-thread), and is less likely to suffer data corruption.
 
-LMDB supports multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a transaction), and because our nodes are more granular than LMDB's B+ tree pages.
+LMDB uses multi-version concurrency control (MVCC). This is great for concurrency, because writers don't block readers, and readers don't block anybody (in fact there are no locks or system calls at all in the read path). But yes, this does mean that Quadrable has built a copy-on-write layer on top of a copy-on-write database. This is necessary because LMDB's MVCC snapshots are not persistent (they cannot outlive a transaction), and because our nodes are more granular than LMDB's B+ tree pages.
 
 ### nodeId
 
-Some implementations of hash trees store leaves and nodes in a database keyed by the node's hash. This has the nice property that records are automatically de-duplicated. Since a collision-resistant hash function is used, if two values have the same hash they can be assumed to be identical. This is called [content-addressable storage](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects).
+Some implementations of hash trees store leaves and nodes in a database keyed by the node's hash. This has the nice property that records are automatically de-duplicated. Since a collision-resistant hash function is used, if two nodes have the same hash they can be assumed to be identical, including the entire sub-tree of nodes underneath it. This is called [content-addressable storage](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects).
 
 Quadrable does not do this. Instead, every time a node is added, a numeric 64-bit incrementing `nodeId` is allocated and the node is stored with this key. Although records are not de-duplicated, there are several advantages to this scheme:
 
-* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, the top few levels of nodes in a tree are likely to reside in the same or nearby B+ tree pages.
+* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, the top few levels of nodes in a tree are likely to reside in the same or nearby B+ tree pages. If nodes were looked-up based on their hash, traversing the tree would result in a pure random-access IO pattern (which is bad).
 * When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree. Since a nodeId is never reused, nobody could've "grabbed it back".
 * Intermediate nodes don't store the hashes of their two children nodes, but instead just the nodeIds. This means these references occupy `8*2 = 16` bytes, rather than `32*2 = 64`.
 
@@ -659,8 +659,8 @@ Internally there are several different types of nodes:
 
 * **Branches**: These are interior nodes that reference one or two children nodes. In the case where one of the nodes is an empty node, a branch left/right node is used. If the right child is empty, a branch left node is used, and vice versa. If neither are empty then a branch both node is used. Note that a branch implies that there are 2 or more leaves somewhere underneath this node, otherwise the branch node would be collapsed to a leaf or would be empty.
 * **Empty**: Empty nodes are not stored in the database, but instead are implicit children of branch left/right nodes.
-* **Leaf**: These are collapsed leaves, and contain enough information to satisfy get/put/del operations. A hash of the key is stored, but not the key itself. This is (optionally) stored in a [separate table](#key-tracking).
-* **Witness** and **WitnessLeaf**: These are nodes that exist in partial-trees. A Witness node could be standing in for either a branch or a leaf, but a WitnessLeaf could only be a Leaf. The only difference between a WitnessLeaf and a Leaf is that the WitnessLeaf only stores a hash of the value, not the value itself. This means that it cannot be used to satisfy a get request. However, it still could be used for non-inclusion purposes, or for updating/deletion.
+* **Leaf**: These are collapsed leaves, and contain enough information to satisfy get/put/del operations. A hash of the key is stored, but not the key itself. The key is (optionally) stored in a [separate table](#key-tracking).
+* **Witness** and **WitnessLeaf**: These are nodes that exist in partial-trees. A Witness node could be standing in for either a branch or a leaf, but a WitnessLeaf always represents a Leaf. The only storage-level difference between a WitnessLeaf and a Leaf is that the WitnessLeaf only stores a hash of the value, not the value itself. This means that it cannot be used to satisfy a get request. However, it still could be used for non-inclusion purposes, or for updating/deletion.
 * **WitnessBranch**: This nodeType is *not implemented* currently. In the future it could be useful for creating smaller proofs where a deletion is required. It may make sense to implement all of WitnessBranchBoth, WitnessBranchLeft, and WitnessBranchRight to avoid sending empty hashes.
 
 ### Node layout in storage
