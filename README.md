@@ -26,6 +26,7 @@ Quadrable is an authenticated multi-version database that can efficiently sync i
   * [Proof encodings](#proof-encodings)
 * [Syncing](#syncing)
   * [Algorithm](#algorithm)
+  * [Depth Limits](#depth-limits)
   * [bytesBudget](#bytesbudget)
   * [Pruned Trees](#pruned-trees)
 * [Integer Keys](#integer-keys)
