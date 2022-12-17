@@ -1,25 +1,30 @@
-next
-  refactor test lib
-  try flatmaps instead of std::map, ie in the update change-set
-  separate interior and leaf nodes into their own DBs to reduce fragmentation caused by uneven-sized leaf nodes
-    * also normalise interior node size
+features
   method to copy a MemStore tree into LMDB, replacing witness with trees when possible
-  in garbage collection, never collect the highest-id node in the DB, to prevent ID re-use
-  ? clean-up key/keyHash terminology
-  sync
+  pruning
+    methods to perform pruning
     sync to/from pruned trees
-    ? can sync.diff method use finishedNodes as optimisation
-    docs, benchmarks
-
-lib
-  ! tests for diff and mergeProof
-  ! exporting proof of 0 keys should return a root witness
-
-  - proof suitable for deletion (uses witnessLeafs instead of witnesses where necessary)
-    ? WitnessBranch
-  - warn when exporting partial tree
-  - de-dup trees using diff functionality
-
+  proofs suitable for deletion (uses witnessLeafs instead of witnesses where necessary)
+    ? WitnessBranch: only advantage is it reduces needed strands by 1
+  de-dup trees using diff functionality
   ? changeable hash function
-  ? compact tree to ensure nodeIds are sequential
+
+docs
+  graphs of sync benchmarks
+
+bugs
+  exporting proof of 0 keys should return a root witness
+  in garbage collection, never collect the highest-ID node in the DB, to prevent ID re-use
+  ? clean-up key/keyHash terminology
   ? resource limits on proof sizes when verifying (setMaxProofCmds?)
+
+opt
+  separate interior and leaf nodes into their own DBs to reduce fragmentation caused by uneven-sized leaf nodes
+    normalise interior node size
+  ? tree compaction to ensure nodeIds are sequential
+  ? flatmaps instead of std::map, ie in the update change-set
+  ? any benefit to sync.diff using finishedNodes
+
+tests
+  tests for diff and mergeProof
+  refactor test lib, multiple files
+  ability to run a single test/file during dev
