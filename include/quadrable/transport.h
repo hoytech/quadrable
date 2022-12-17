@@ -57,7 +57,6 @@ inline std::string encodeProof(const Proof &p, EncodingType encodingType = Encod
 
     // Strands
 
-
     for (auto &strand : p.strands) {
         o += static_cast<unsigned char>(strand.strandType);
         o += static_cast<unsigned char>(strand.depth);
@@ -163,7 +162,6 @@ inline std::string encodeProof(const Proof &p, EncodingType encodingType = Encod
 
 inline Proof decodeProof(std::string_view encoded) {
     Proof proof;
-
 
     // Encoding type
 

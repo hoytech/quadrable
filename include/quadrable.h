@@ -23,13 +23,8 @@ using hoytech::to_hex;
 using hoytech::from_hex;
 #endif
 
-// Externally useful
-
 #include "quadrable/varint.h"
 #include "quadrable/utils.h"
 #include "quadrable/Key.h"
-
-// Internal-only
-
 #include "quadrable/structsPublic.h"
 #include "quadrable/Quadrable.h"
