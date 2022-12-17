@@ -1,12 +1,14 @@
 next
   refactor test lib
-  try flatmaps instead of std::map
+  try flatmaps instead of std::map, ie in the update change-set
   separate interior and leaf nodes into their own DBs to reduce fragmentation caused by uneven-sized leaf nodes
     * also normalise interior node size
-  method to copy a MemStore tree into LMDB
+  method to copy a MemStore tree into LMDB, replacing witness with trees when possible
+  in garbage collection, never collect the highest-id node in the DB, to prevent ID re-use
+  ? clean-up key/keyHash terminology
   sync
     sync to/from pruned trees
-    ability to copy a shadow tree into LMDB, expanding witnesses
+    ? can sync.diff method use finishedNodes as optimisation
     docs, benchmarks
 
 lib

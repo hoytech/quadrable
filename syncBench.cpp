@@ -46,7 +46,7 @@ void doIt() {
     rnd.seed(0);
 
     for (uint loopVar = 10; loopVar < 20'001; loopVar *= 2) {
-        uint64_t numElems = 1'000'000;
+        uint64_t numElems = 100000;
         uint64_t maxElem = numElems;
         uint64_t numAlterations = loopVar;
 
@@ -90,15 +90,19 @@ void doIt() {
         uint64_t roundTrips = 0;
 
         while(1) {
-            auto reqs = sync.getReqs(txn);
-            bytesUp += transport::encodeSyncRequests(reqs).size();
+            auto reqs = sync.getReqs(txn, 10000);
+            uint64_t reqSize = transport::encodeSyncRequests(reqs).size();
+            bytesUp += reqSize;
             if (reqs.size() == 0) break;
 
-            auto resps = db.handleSyncRequests(txn, newNodeId, reqs, 0);
-            bytesDown += transport::encodeSyncResponses(resps).size();
+            auto resps = db.handleSyncRequests(txn, newNodeId, reqs, 100000);
+            uint64_t respSize = transport::encodeSyncResponses(resps).size();
+            bytesDown += respSize;
             sync.addResps(txn, reqs, resps);
 
             roundTrips++;
+
+            std::cout << "RT: " << roundTrips << " up: " << reqSize << " down: " << respSize << std::endl;
         }
 
         db.checkout(sync.nodeIdShadow);

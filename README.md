@@ -499,12 +499,40 @@ The depth limit of 4 seems to be a good balance for most applications. One of th
 
 ### bytesBudget
 
-When dealing with large and highly divergent trees, the request and response sizes can become very large. Sometimes this is not desirable because the transport used has message/buffer size restrictions. Furthermore, very large messages can reduce the effectiveness of back-pressure.
+When dealing with large and highly divergent trees, the request and response sizes can become very large. Sometimes this is not desirable for various reasons:
 
+* The network transport used may have message size restrictions
+* Progress-bar type reporting becomes more difficult
+* Large buffers may need to be allocated in several places during transmission and reception
+* Even if it's possible with a particular network transport, Quadrable does not begin processing a request until the entire message has been received, reducing parallelism
 
+For these reasons, when creating requests and/or responses, a `bytesBudget` parameter can be specified. This limits the sizes of the requests/responses. Requests can be made smaller simply by requesting fewer items and waiting until a subsequent request comes before querying the remaining. Responses can be made smaller by not responding to all the items in a request. The syncer supports this, and will pick up any missing items in its next tree reconcilliation.
+
+Use of `bytesBudget` is itself a trade-off. It slightly increases bandwidth overhead but, more importantly, it also increases the number of round-trips.
+
+`bytesBudget` is not a hard guarantee, and message will often be smaller than this number. The encoded message sizes are estimated during processing, not computed exactly, and this estimation is in most cases conservative. Messages can also be larger than the `bytesBudget` when large leaf values are present, because the sync protocol does not yet support chunking values.
+
+For trees that mostly contain short leaf values, with the default depth limits normal response sizes are typically about 10 times larger than the requests.
+
+The `syncBench.cpp` program can be used to experiment with different values for `bytesBudget`.
 
 ### Pruned Trees
 
+**WARNING**: The functionality described in this section is not fully implemented.
+
+In addition to garbage collection which removes no-longer-needed nodes/leaves, Quadrable has been designed to support pruning trees. This can be done by replacing a sub-tree with a Witness (or a leaf with a Witness or WitnessLeaf). Subsequent garbage collection runs will recycle the storage.
+
+Trees may be pruned in various circumstances:
+
+* An application may only be concerned with the most recent observations and would like to save storage space by not storing entries older than a certain time period. With pruning, this can be done without compromising the ability to interact with other entities, even if they have different retention policies.
+* Similarly, according to some application-level attribute, certain records may be no longer useful/needed (ie expired).
+* An application may wish to remove/censor a particular leaf value without compromising the ability to interact with other entities with differing policies.
+
+Quadrable's algorithms work to varying degrees when processing trees with witness nodes. As long as a witness node is not encountered during a traversal, everything works: gets, updates, proofs, etc. However there is still work to be done here to expose application-level control over the behaviour when witnesses *are* encountered.
+
+The sync algorithm in particular requires some special updating to work in this case: When the syncer reconstructs a witness node, how does it know if this is because the provider has pruned the node or is simply yet to send it?
+
+Our plan for handling this is to add two proof-only node types: FinalWitness and FinalWitnessLeaf (names TBD). These will indicate to the syncer that the provider has no more data to send for these nodes. The syncer will translate these into Witness/WitnessLeaf nodes in its storage. Although we haven't implemented it yet, the ability to support this is one of the reasons the tree reconcilliation algorithm is designed the way it is -- stay tuned!
 
 
 
@@ -1120,7 +1148,49 @@ Proofs exported as ranges are identical to regular proofs, so importing is done 
 
 ### Sync class
 
-The `Sync` class is a stateful coordinator that FIXME
+The `Sync` class is a stateful coordinator that implements the [syncing algorithm](#syncing).
+
+The syncer's code might look something like this:
+
+    Quadrable::Sync sync(&db, txn, syncerNodeId);
+
+    while (1) {
+        auto reqs = sync.getReqs(txn);
+        if (reqs.size() == 0) break;
+
+        std::string reqsEncoded = quadrable::transport::encodeSyncRequests(reqs);
+
+        // Somehow transmit reqsEncoded to provider, and get responses
+        auto respsEncoded = ...;
+
+        auto resps = quadrable::transport::decodeSyncResponses(respsEncoded);
+
+        sync.addResps(txn, reqs, resps);
+    }
+
+* The syncer does *not* need to use the same `txn` for each call, although `syncerNodeId` should not change and you should somehow ensure it does not get garbage collected (ie it should be a head, or GC disabled).
+
+The provider's code is simpler because it is stateless:
+
+    auto reqs = quadrable::transport::decodeSyncRequests(reqsEncoded);
+
+    auto resps = db.handleSyncRequests(txn, providerNodeId, reqs);
+
+    std::string respsEncoded = quadrable::transport::encodeSyncResponses(resps);
+
+* The applications need to somehow ensure that the same `providerNodeId` is used in each call. Otherwise, exceptions will be thrown when the syncer calls `sync.addResps()`.
+
+After the sync is complete, the syncer can either access the shadow tree directly by checking out the `sync.nodeIdShadow` node, or can use the `diff` method to extract the differences:
+
+    sync.diff(txn, origNodeId, sync.nodeIdShadow, [&](auto dt, const auto &node){
+        if (dt == Quadrable::DiffType::Added) {
+            // node exists only on the provider-side
+        } else if (dt == Quadrable::DiffType::Deleted) {
+            // node exists only on the syncer-side
+        } else if (dt == Quadrable::DiffType::Changed) {
+            // nodes differ. node is the one on the provider-side
+        }
+    });
 
 
 ### Garbage Collection
