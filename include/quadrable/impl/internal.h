@@ -30,7 +30,7 @@ uint64_t writeNodeToDb(lmdb::txn &txn, std::string_view nodeRaw, bool isLeaf) {
 
         memStore->nodes[newNodeId] = std::string(nodeRaw);
     } else {
-        uint64_t newNodeId = getNextId(txn, isLeaf);
+        newNodeId = getNextId(txn, isLeaf);
 
         auto dbi = isLeaf ? dbi_nodesLeaf : dbi_nodesInterior;
         dbi.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);

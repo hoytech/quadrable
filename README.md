@@ -513,7 +513,7 @@ For these reasons, when creating requests and/or responses, a `bytesBudget` para
 
 Use of `bytesBudget` has some disadvantages: It slightly increases overhead and, more importantly, it increases the number of round-trips.
 
-`bytesBudget` is not a hard guarantee, and message will often be smaller than this number because the encoded message sizes are estimated during processing, not computed exactly, and this estimation is in most cases conservative. Messages can also be larger than the `bytesBudget` when large leaf values are present, because the sync protocol does not support chunking values.
+`bytesBudget` is not a hard guarantee, and messages will often be smaller than this number because the encoded message sizes are estimated during processing, not computed exactly, and this estimation is in most cases conservative. Messages can also be larger than the `bytesBudget` when large leaf values are present, because the sync protocol does not support chunking values.
 
 For trees that mostly contain short leaf values, normal response sizes are typically about 10 times larger than the requests (with the default depth limits).
 
@@ -565,6 +565,8 @@ Do *not* use both integer keys and hashed keys in the same tree. If you do, then
 
 Because consecutive keys are often adjacent in the tree they can take good advantage of [combined proofs](#combined-proofs). This means that proofs for consecutive ranges of keys are also compact:
 
+    $ quadb checkout
+    $ perl -E 'for $i (1..1_000_000) { say "$i,value" }' | quadb import --int
     $ perl -E 'for $i (1_000..1_999) { say $i }' | quadb exportProof --int --stdin | wc -c
     12978
 
