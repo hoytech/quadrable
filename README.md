@@ -51,6 +51,7 @@ Quadrable is an authenticated multi-version database that can efficiently sync i
   * [Exporting/Importing Proofs](#exporting/importing-proofs)
   * [Sync class](#sync-class)
   * [Garbage Collection](#garbage-collection)
+* [Alternate Implementations](#alternate-implementations)
 * [Author and Copyright](#author-and-copyright)
 <!-- END OF TOC -->
 
@@ -60,13 +61,13 @@ Quadrable is an authenticated multi-version database that can efficiently sync i
 
 * *Authenticated*: The state of the database can be digested down to a 32-byte value, known as the "root". This represents the complete contents of the database, and any modifications will result in a new root. Anyone who knows the root value of a database can perform remote queries on it and be confident that the responses are authentic. To accomplish this, the remote server provides a [proof](#proofs) along with each response, which is validated against the root.
 * *Multi-version*: Many different versions of the database can exist at the same time. Deriving one version from another doesn't require copying the database. Instead, all of the data that is common between the versions is shared. This [copy-on-write](#copy-on-write) behaviour allows very inexpensive database snapshots and checkpoints.
-* *Syncing*: By leveraging the proof functionality, applications can [synchronise](#syncing) with remote instances. Conflict-handling is flexible, and can work by either cloning one side, or merging the states together as a CRDT. By determining which records are present on the remote instance but not the local instance, and vice versa, sync overhead is minimised, and can be optimised for either transfer size or round-trips.
+* *Syncable*: By leveraging the proof functionality, applications can [synchronise](#syncing) with remote instances. Conflict-handling is flexible, and can work by either cloning one side or by merging the states together (like a CRDT). By determining which records are present on the remote instance but not the local instance and vice versa, sync overhead is minimised, and can be optimised for either transfer size or round-trips.
 
 Although not required to use the library, it may help to understand the core data-structure used by Quadrable:
 
 * *Merkle tree*: Each version of the database is a [tree](#trees-and-exponential-growth). The leaves of this tree are the inserted records which are combined together with calls to a cryptographic hash function, creating a smaller set of intermediate nodes. These intermediate nodes are then combined in a similar way to create a still smaller set, and this procedure continues until a single node is left, which is the root node. These "hash trees" are commonly called merkle trees, and they provide the mechanism for Quadrable's authentication.
 * *Binary*: The style of merkle tree used by Quadrable combines together [exactly two](#merkle-trees) nodes to create a node in the next layer. There are alternative designs such as N-ary radix trees, AVL trees, and tries, but they are more complicated to implement and typically have a higher authentication overhead (in terms of proof size). With a few optimisations and an attention to implementation detail, binary merkle trees enjoy almost all the benefits of these alternative designs.
-* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, for example 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) key-space. This means that hashes of keys can be used directly as each leaf's location in the tree. Alternatively, Quadrable supports using [sequential integers as keys](#integer-keys) to implement an appendable log.
+* *Sparse*: A traditional binary merkle tree does not have a concept of an "empty" leaf. This means that the leaves must be in a sequence, for example 1 through N (with no gaps). This raises the question about what to do when N is not a power of two. Furthermore, adding new records in a "path-independent" way, where insertion order doesn't matter, is difficult to do efficiently. Quadrable uses a [sparse](#sparseness) merkle tree structure, where there *is* a concept of an empty leaf, and leaf nodes can be placed anywhere inside a large (256-bit) key-space. This means that hashes of keys can be used directly as each leaf's location in the tree. Alternatively, Quadrable supports using [sequential integers as keys](#integer-keys) to implement an ordered data-sets.
 
 Values are authenticated by exporting and importing proofs:
 
@@ -395,7 +396,7 @@ Unlike the C++ implementation which first decodes to the `quadrable::Proof` inte
 
 
 
-#### External representation
+#### Transport representation
 
 The first byte is the proof encoding type described above. It is followed by serialised lists of strands and commands:
 
@@ -465,9 +466,9 @@ If the most significant bit is `1` in a command byte, it is a jump:
 
 Proofs allow us to export a useful portion of the tree and transmit it to a remote entity who can then perform operations on it, or compare it against one of their own trees. Any shared structure between trees is immediately obvious because the hashes of their highest shared nodes will match. In addition to creating proofs for particular keys or ranges of keys, Quadrable also provides a "sync" operation that can be used when you don't know the set of keys that you want a proof for.
 
-The sync protocol has two parties, a syncer and a provider. The syncer wishes to compare their version of a tree to the version held by the provider. The syncer maintains the state of the sync and passes requests to the provider, who replies with responses. The provider is stateless. Each one of these requests/response pairs is called a "round-trip", and the goal of the syncing algorithm is to minimise round-trips, along with the total size in bytes of the requests and responses.
+The sync protocol has two parties: a syncer and a provider. The syncer wishes to compare their version of a tree to the version held by the provider. The syncer maintains the state of the sync and sends requests to the provider, who replies with responses. The provider is stateless. Each one of these requests/response pairs is called a "round-trip", and the goal of the syncing algorithm is to minimise round-trips, along with the total size in bytes of the requests and responses.
 
-The end result of performing the sync algorithm is for the syncer to have constructed a "shadow" copy of the provider's tree. This shadow copy is typically stored in a [MemStore](#memstore) so that LMDB write locks don't need to be acquired. If the syncer and provider's trees share any structure, then this shadow tree will take up less space than the provider's tree, since shared sub-trees will be pruned to witness nodes. Busy servers should rely on Quadrable's [copy-on-write](#copy-on-write) functionality so that the sync process can be run against a stable older snapshot of the tree without having to stop processing new transactions during the sync.
+The end result of performing the sync algorithm is for the syncer to have constructed a "shadow" copy of the provider's tree. This shadow copy is typically stored in a [MemStore](#memstore) so that LMDB write locks don't need to be acquired. If the syncer and provider's trees share any structure, then this shadow tree will take up less space than the provider's tree, since shared sub-trees will be pruned to witness nodes. Busy servers should take advantage of Quadrable's [copy-on-write](#copy-on-write) functionality so that the sync process can be run against a stable older snapshot of the tree without having to stop servicing users during the sync (or leave open a long-running LMDB transaction).
 
 ### Algorithm
 
@@ -483,14 +484,13 @@ Normal Quadrable proofs are constructed using a depth-first traversal which dive
 After the syncer has constructed the shadow copy of the provider's tree, it can then optionally incorporate values from this tree into its own. There are several options here:
 
 * Synchronisation: Simply replace the local tree with the shadow tree (after expanding its witness nodes). This is a leader/follower configuration where the syncer is replicating the data from the provider.
-* Grow-only: For all leaves that exist in the shadow tree but not locally, insert into the local tree. Ignore deletions and changes. This implements.
-* Last-Write-Wins: Same as above, but handle changes as well, and discard the version with the older timestamp.
-For any modified values, replace if their timestamp is newer than the local version.
+* Grow-only: For all leaves that exist in the shadow tree but not locally, insert into the local tree. Ignore deletions and changes. This implements a "delta-state G-set CRDT".
+* Last-Write-Wins: Same as above, but handle changes as well by incorporating records with newer timestamps (and use tombstones for deletion).
 * Other arbitrary logic: The syncer effectively has the full copies of both trees, so any sort of diffing/patching algorithm can be applied.
 
 ### Depth Limits
 
-When syncing, there is a trade-off between bandwith and round-trips. In the degenerate case, the provider could simply send the entire tree when queried. This would only require a single round-trip, however much unnecessary data would be transferred if the trees share structure.
+When syncing, there is a trade-off between bandwith and round-trips. In the degenerate case, the provider could simply send the entire tree on every sync. This would only require a single round-trip, however much unnecessary data would be transferred if the trees share structure.
 
 At the other end of the spectrum, each request could specify a depth limit of 1. A larger depth limit results in transferring unnecessary witnesses, but reduces the number of round-trips needed. But since witnesses are small, it makes sense to speculatively pre-load witnesses in the event they are needed. By default the depth limits for both the initial and later requests are set to `4`, but these can be changed:
 
@@ -505,15 +505,15 @@ The depth limit of 4 seems to be a good balance for most applications. One of th
 When dealing with large and highly divergent trees, the request and response sizes can become quite large. Sometimes this is not desirable:
 
 * The network transport used may have message size restrictions
-* Progress-bar type reporting becomes more difficult
+* Progress-bar type reporting and natural back-pressure becomes more difficult
 * Large buffers may need to be allocated in several places during transmission and reception
-* Even if it's possible with a particular network transport, Quadrable does not begin processing a request until the entire message has been received, reducing parallelism
+* Even if it's possible with a particular network transport, Quadrable does not begin processing a request until the entire message has been received
 
-For these reasons, when creating requests and/or responses, a `bytesBudget` parameter can be specified. This limits the sizes of the requests/responses. Requests can be made smaller simply by requesting fewer items and querying the rest later. Responses can be made smaller by not responding to all the items in a request. The syncer supports this, and will re-request any missing items in its next tree reconcilliation.
+For these reasons, when creating requests and/or responses, a `bytesBudget` parameter can be specified. This limits the sizes of the requests/responses. Requests can be made smaller simply by requesting fewer items and querying the rest later. Responses can be made smaller by not responding to all the items in a request. The syncer supports this, and will re-request any missing items in its next round of tree reconcilliation.
 
-Use of `bytesBudget` does have some disadvantages: It slightly increases bandwidth overhead but, more importantly, it increases the number of round-trips.
+Use of `bytesBudget` has some disadvantages: It slightly increases overhead and, more importantly, it increases the number of round-trips.
 
-`bytesBudget` is not a hard guarantee, and message will often be smaller than this number. The encoded message sizes are estimated during processing, not computed exactly, and this estimation is in most cases conservative. Messages can also be larger than the `bytesBudget` when large leaf values are present, because the sync protocol does not support chunking values.
+`bytesBudget` is not a hard guarantee, and message will often be smaller than this number because the encoded message sizes are estimated during processing, not computed exactly, and this estimation is in most cases conservative. Messages can also be larger than the `bytesBudget` when large leaf values are present, because the sync protocol does not support chunking values.
 
 For trees that mostly contain short leaf values, normal response sizes are typically about 10 times larger than the requests (with the default depth limits).
 
@@ -527,7 +527,7 @@ In addition to garbage collection which removes no-longer-needed nodes/leaves, Q
 
 Trees may be pruned in various circumstances:
 
-* An application may only be concerned with the most recent observations and would like to save storage space by not storing entries older than a certain time period. With pruning, this can be done without compromising the ability to interact with other entities, even if they have different retention policies.
+* An application may only be concerned with the most recent records and would like to save storage space by not storing entries older than a certain time period. With pruning, this can be done without compromising the ability to interact with other entities, even if they have different retention policies.
 * Similarly, according to some application-level attribute, certain records may be no longer useful/needed (expired, account deactivated, etc).
 * An application may wish to remove/censor a particular leaf value without compromising the ability to interact with other entities with differing policies.
 
@@ -1221,6 +1221,14 @@ The `GarbageCollector` class can be used to deallocate unneeded nodes. See the i
 
 * `gc.markAllHeads()` will mark all the heads stored in the `quadrable_head` table. But if you have other roots stored you would like to preserve you can mark them with `gc.markTree()`. Both of these methods can be called inside a read-only transaction.
 * When you are done marking nodes, call `gc.sweep()`. This must be done inside a read-write transaction. All nodes that weren't found during the mark phase are deleted.
+
+
+
+## Alternate Implementations
+
+This repository contains the C++ implementation, which is the primary reference for the system and protocol.
+
+* There is also a [partial implementation in Solidity](https://github.com/hoytech/quadrable-solidity), although it may not be compatible with the latest versions of Quadrable.
 
 
 
