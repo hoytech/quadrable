@@ -663,11 +663,11 @@ The 64 bits of `nodeId` key-space is divided into the following ranges:
 
 | ID Range | Description | Storage |
 |--------------|-----------|------------|
-| 0 | Implicit empty node | None |
-| 1 ... 2**58 - 1 | Leaf Nodes | LMDB |
-| 2**58 ... 2**59 - 1 | Interior Nodes | LMDB |
-| 2**59 ... 2**60 - 1 | Nodes (any) | MemStore |
-| 2**60 ... 2**64 - 1 | Invalid (reserved) | N/A |
+| `0` | Implicit empty node | None |
+| `1 ... 2^58 - 1` | Leaf Nodes | LMDB |
+| `2^58 ... 2^59 - 1` | Interior Nodes | LMDB |
+| `2^59 ... 2^60 - 1` | Nodes (any) | MemStore |
+| `2^60 ... 2^64 - 1` | Invalid (reserved) | N/A |
 
 * Leaf nodes are segregated into their own table because some applications may choose to index and access leafs separately from the Quadrable tree. During such access patterns, the branch nodes are not needed and so having them interspersed with leaves will reduce the benefits of spatial locality.
 * Interior node values are also in their own table which helps locality during tree traversals. These nodes are padded out to 48 bytes when necessary to prevent any fragmentation.
