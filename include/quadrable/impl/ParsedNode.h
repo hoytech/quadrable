@@ -23,8 +23,8 @@ class ParsedNode {
         if (raw.size() < 8) throw quaderr("invalid node, too short");
 
         uint64_t w1Packed = lmdb::from_sv<uint64_t>(raw.substr(0, 8));
-        nodeType = static_cast<NodeType>(w1Packed & 0xFF);
-        uint64_t w1 = w1Packed >> 8;
+        nodeType = static_cast<NodeType>(w1Packed & 0x0F);
+        uint64_t w1 = w1Packed >> 4;
 
         if (nodeType == NodeType::BranchLeft) {
             leftNodeId = w1;

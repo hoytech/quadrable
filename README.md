@@ -467,11 +467,11 @@ Proofs allow us to export a useful portion of the tree and transmit it to a remo
 
 The sync protocol has two parties, a syncer and a provider. The syncer wishes to compare their version of a tree to the version held by the provider. The syncer maintains the state of the sync and passes requests to the provider, who replies with responses. The provider is stateless. Each one of these requests/response pairs is called a "round-trip", and the goal of the syncing algorithm is to minimise round-trips, along with the total size in bytes of the requests and responses.
 
-The end result of performing the sync algorithm is for the syncer to have constructed a "shadow" copy of the provider's tree. This shadow copy is typically stored in a [MemStore](#memstore) so that LMDB write locks don't need to be acquired. If the syncer and provider's trees share any structure, then this shadow tree will take up less space than the provider's tree, since shared sub-trees will be pruned to witness nodes.
-
-Normal Quadrable proofs are constructed using a depth-first traversal which dives deep enough to find each item to be proved. Instead, the sync algorithm does a breadth-first traversal limited to a particular depth in order to create a proof for the existence of all witnesses at that depth. A sync response is simply a list of these "proof fragments".
+The end result of performing the sync algorithm is for the syncer to have constructed a "shadow" copy of the provider's tree. This shadow copy is typically stored in a [MemStore](#memstore) so that LMDB write locks don't need to be acquired. If the syncer and provider's trees share any structure, then this shadow tree will take up less space than the provider's tree, since shared sub-trees will be pruned to witness nodes. Busy servers should rely on Quadrable's [copy-on-write](#copy-on-write) functionality so that the sync process can be run against a stable older snapshot of the tree without having to stop processing new transactions during the sync.
 
 ### Algorithm
+
+Normal Quadrable proofs are constructed using a depth-first traversal which dives deep enough to find each item to be proved. Instead, the sync algorithm does a breadth-first traversal limited to a particular depth in order to create a proof for the existence of all witnesses at that depth. A sync response is simply a list of these "proof fragments".
 
 1. The syncer creates an initial request, which queries for witnesses immediately below the root node limited to a depth, and sends this to the provider.
 2. The provider performs a breadth-first traversal of its tree, and creates a proof fragment for the witnesses at the specified depth. Note that for the purposes of the depth limit, a branch with one item empty is *not* counted towards increasing the depth (because such branches can be encoded very cheaply in the proof). The proof fragment is returned back to the syncer.
@@ -483,7 +483,9 @@ Normal Quadrable proofs are constructed using a depth-first traversal which dive
 After the syncer has constructed the shadow copy of the provider's tree, it can then optionally incorporate values from this tree into its own. There are several options here:
 
 * Synchronisation: Simply replace the local tree with the shadow tree (after expanding its witness nodes). This is a leader/follower configuration where the syncer is replicating the data from the provider.
-* Merge: For all leaves that exist in the shadow tree but not locally, insert into the local tree. For any modified values, replace if their timestamp is newer than the local version. This implements a G-Set (grow-only) delta-state CRDT.
+* Grow-only: For all leaves that exist in the shadow tree but not locally, insert into the local tree. Ignore deletions and changes. This implements.
+* Last-Write-Wins: Same as above, but handle changes as well, and discard the version with the older timestamp.
+For any modified values, replace if their timestamp is newer than the local version.
 * Other arbitrary logic: The syncer effectively has the full copies of both trees, so any sort of diffing/patching algorithm can be applied.
 
 ### Depth Limits
@@ -649,9 +651,24 @@ Some implementations of hash trees store leaves and nodes in a database keyed by
 
 Quadrable does not do this. Instead, every time a node is added, a numeric 64-bit incrementing `nodeId` is allocated and the node is stored with this key. Although records are not de-duplicated, there are several advantages to this scheme:
 
-* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, the top few levels of nodes in a tree are likely to reside in the same or nearby B+ tree pages. If nodes were looked-up based on their hash, traversing the tree would result in a pure random-access IO pattern (which is bad).
+* Nodes are clustered together in the database based on when they were created. This takes advantage of the phenomenon known as [locality of reference](https://medium.com/@adamzerner/spatial-and-temporal-locality-for-dummies-b080f2799dd). In particular, consecutively inserted leaves, and the top few levels of nodes in a tree, are likely to reside in the same or nearby B+ tree pages. Updates involve writing mostly consecutive entries. If nodes were looked-up or written based on their hashes, this would result in a pure random-access IO pattern (which is bad).
 * When garbage collecting unneeded nodes, no locking or reference counting is required. A list of collectable nodeIds can be assembled using an LMDB read-only transaction, which does not interfere with any other transactions. The nodeIds it finds can simply be deleted from the tree. Since a nodeId is never reused, nobody could've "grabbed it back".
 * Intermediate nodes don't store the hashes of their two children nodes, but instead just the nodeIds. This means these references occupy `8*2 = 16` bytes, rather than `32*2 = 64`.
+
+#### nodeId Key-space
+
+The 64 bits of `nodeId` key-space is divided into the following ranges:
+
+| ID Range | Description | Storage |
+|--------------|-----------|------------|
+| 0 | Implicit empty node | None |
+| 1 ... 2**58 - 1 | Leaf Nodes | LMDB |
+| 2**58 ... 2**59 - 1 | Interior Nodes | LMDB |
+| 2**59 ... 2**60 - 1 | Nodes (any) | MemStore |
+| 2**60 ... 2**64 - 1 | Invalid (reserved) | N/A |
+
+* Leaf nodes are segregated into their own table because some applications may choose to index and access leafs separately from the Quadrable tree. During such access patterns, the branch nodes are not needed and so having them interspersed with leaves will reduce the benefits of spatial locality.
+* Interior node values are also in their own table which helps locality during tree traversals. These nodes are padded out to 48 bytes when necessary to prevent any fragmentation.
 
 ### nodeType
 
@@ -667,18 +684,22 @@ Internally there are several different types of nodes:
 
 Nodes are stored as byte strings in the `quadrable_node` table in LMDB.
 
-The first 8 bytes are a combination of a tag value which indicates the nodeType, and an optional nodeId. These 8 bytes are a uint64_t stored in native byte order (which, yes, means that a Quadrable database file is *not* portable between machines of different endianness). The nodeId is shifted left 8 bits and a single byte tag is bitwise or'ed in.
+The first 8 bytes are a combination of a tag value which indicates the nodeType, and an optional nodeId. These 8 bytes are a uint64_t stored in native byte order (which, yes, means that a Quadrable database file is *not* portable between machines of different endianness). The nodeId is shifted left 4 bits and a single byte tag is bitwise or'ed in.
 
 The following 32 bytes are a cache of the nodeHash of this node. In principle, this value could be reconstructed by recrawling the sub-tree beneath this node and rehashing the leaves and combining upwards, however this would ruin performance since the nodeHash is frequently needed, for example during tree updates and proof generation.
 
 The meaning of the remaining bytes depend on the nodeType:
 
-    branch left:  [8 bytes: \x01 | leftNodeId << 8]  [32 bytes: nodeHash]
-    branch right: [8 bytes: \x02 | rightNodeId << 8] [32 bytes: nodeHash]
-    branch both:  [8 bytes: \x03 | leftNodeId << 8]  [32 bytes: nodeHash] [8 bytes: right nodeId]
-    leaf:         [8 bytes: \x04 | 0]                [32 bytes: nodeHash] [32 bytes: keyHash] [N bytes: val]
+Interior nodes:
+
+    branch left:  [8 bytes: \x01 | leftNodeId << 4]  [32 bytes: nodeHash] [8 bytes: padding]
+    branch right: [8 bytes: \x02 | rightNodeId << 4] [32 bytes: nodeHash] [8 bytes: padding]
+    branch both:  [8 bytes: \x03 | leftNodeId << 4]  [32 bytes: nodeHash] [8 bytes: right nodeId]
+    witness:      [8 bytes: \x05 | 0]                [32 bytes: nodeHash] [8 bytes: padding]
+
+Leaf nodes:
  
-    witness:      [8 bytes: \x05 | 0]                [32 bytes: nodeHash]
+    leaf:         [8 bytes: \x04 | 0]                [32 bytes: nodeHash] [32 bytes: keyHash] [N bytes: val]
     witnessLeaf:  [8 bytes: \x06 | 0]                [32 bytes: nodeHash] [32 bytes: keyHash] [32 bytes: valHash]
 
 

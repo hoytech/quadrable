@@ -18,13 +18,10 @@ bugs
   ? resource limits on proof sizes when verifying (setMaxProofCmds?)
 
 opt
-  separate interior and leaf nodes into their own DBs to reduce fragmentation caused by uneven-sized leaf nodes
-    normalise interior node size
   ? tree compaction to ensure nodeIds are sequential
   ? flatmaps instead of std::map, ie in the update change-set
-  ? any benefit to sync.diff using finishedNodes
 
 tests
-  tests for diff and mergeProof
+  tests for diff, mergeProof, gc
   refactor test lib, multiple files
   ability to run a single test/file during dev

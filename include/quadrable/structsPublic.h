@@ -83,7 +83,8 @@ using SyncResponses = std::vector<Proof>;
 
 
 
-const uint64_t firstMemStoreNodeId = 36028797018963968ULL; // 2**55
+const uint64_t firstInteriorNodeId = 288230376151711744ULL; // 2**58
+const uint64_t firstMemStoreNodeId = 576460752303423488ULL; // 2**59
 
 struct MemStore {
     std::map<uint64_t, std::string> nodes;

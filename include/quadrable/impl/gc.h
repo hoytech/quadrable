@@ -3,6 +3,10 @@ public:
 class GarbageCollector {
   friend class Quadrable;
 
+  private:
+    Quadrable &db;
+    std::set<uint64_t> markedNodes;
+
   public:
     GarbageCollector(Quadrable &db_) : db(db_) {}
 
@@ -31,21 +35,23 @@ class GarbageCollector {
         Stats stats;
 
         std::string_view k, v;
-        auto cursor = lmdb::cursor::open(txn, db.dbi_node);
-        for (bool found = cursor.get(k, v, MDB_FIRST); found; found = cursor.get(k, v, MDB_NEXT)) {
-            stats.total++;
-            uint64_t nodeId = lmdb::from_sv<uint64_t>(k);
-            if (markedNodes.find(nodeId) == markedNodes.end()) {
-                cursor.del();
-                db.dbi_key.del(txn, lmdb::to_sv<uint64_t>(nodeId));
-                stats.collected++;
+
+        auto doRemove = [&](lmdb::dbi dbi){
+            auto cursor = lmdb::cursor::open(txn, dbi);
+            for (bool found = cursor.get(k, v, MDB_FIRST); found; found = cursor.get(k, v, MDB_NEXT)) {
+                stats.total++;
+                uint64_t nodeId = lmdb::from_sv<uint64_t>(k);
+                if (markedNodes.find(nodeId) == markedNodes.end()) {
+                    cursor.del();
+                    db.dbi_key.del(txn, lmdb::to_sv<uint64_t>(nodeId));
+                    stats.collected++;
+                }
             }
-        }
+        };
+
+        doRemove(db.dbi_nodesInterior);
+        doRemove(db.dbi_nodesLeaf);
 
         return stats;
     }
-
-  private:
-    Quadrable &db;
-    std::unordered_set<uint64_t> markedNodes;
 };

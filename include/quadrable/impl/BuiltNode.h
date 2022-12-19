@@ -44,7 +44,7 @@ class BuiltNode {
         nodeRaw += keyHash.sv();
         nodeRaw += val;
 
-        output.nodeId = db->writeNodeToDb(txn, nodeRaw);
+        output.nodeId = db->writeNodeToDb(txn, nodeRaw, true);
         output.nodeType = NodeType::Leaf;
 
         db->setLeafKey(txn, output.nodeId, leafKey);
@@ -83,7 +83,7 @@ class BuiltNode {
         nodeRaw += keyHash.sv();
         nodeRaw += valHash.sv();
 
-        output.nodeId = db->writeNodeToDb(txn, nodeRaw);
+        output.nodeId = db->writeNodeToDb(txn, nodeRaw, true);
         output.nodeType = NodeType::WitnessLeaf;
 
         return output;
@@ -105,13 +105,13 @@ class BuiltNode {
 
         if (rightNode.nodeId == 0) {
             output.nodeType = NodeType::BranchLeft;
-            w1 = uint64_t(NodeType::BranchLeft) | leftNode.nodeId << 8;
+            w1 = uint64_t(NodeType::BranchLeft) | leftNode.nodeId << 4;
         } else if (leftNode.nodeId == 0) {
             output.nodeType = NodeType::BranchRight;
-            w1 = uint64_t(NodeType::BranchRight) | rightNode.nodeId << 8;
+            w1 = uint64_t(NodeType::BranchRight) | rightNode.nodeId << 4;
         } else {
             output.nodeType = NodeType::BranchBoth;
-            w1 = uint64_t(NodeType::BranchBoth) | leftNode.nodeId << 8;
+            w1 = uint64_t(NodeType::BranchBoth) | leftNode.nodeId << 4;
         }
 
         nodeRaw += lmdb::to_sv<uint64_t>(w1);
@@ -119,9 +119,11 @@ class BuiltNode {
 
         if (rightNode.nodeId && leftNode.nodeId) {
             nodeRaw += lmdb::to_sv<uint64_t>(rightNode.nodeId);
+        } else {
+            nodeRaw += lmdb::to_sv<uint64_t>(0); // padding
         }
 
-        output.nodeId = db->writeNodeToDb(txn, nodeRaw);
+        output.nodeId = db->writeNodeToDb(txn, nodeRaw, false);
 
         return output;
     }
@@ -131,10 +133,11 @@ class BuiltNode {
 
         nodeRaw += lmdb::to_sv<uint64_t>(uint64_t(NodeType::Witness));
         nodeRaw += hash.sv();
+        nodeRaw += lmdb::to_sv<uint64_t>(0); // padding
 
         BuiltNode output;
 
-        output.nodeId = db->writeNodeToDb(txn, nodeRaw);
+        output.nodeId = db->writeNodeToDb(txn, nodeRaw, false);
         output.nodeHash = hash;
         output.nodeType = NodeType::BranchBoth;
 

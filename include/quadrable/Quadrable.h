@@ -7,7 +7,8 @@ class Quadrable {
   public:
 
     lmdb::dbi dbi_head;
-    lmdb::dbi dbi_node;
+    lmdb::dbi dbi_nodesLeaf;
+    lmdb::dbi dbi_nodesInterior;
     lmdb::dbi dbi_key;
     bool trackKeys = false;
     bool writeToMemStore = false;
@@ -37,7 +38,8 @@ class Quadrable {
 
     void init(lmdb::txn &txn) {
         dbi_head = lmdb::dbi::open(txn, "quadrable_head", MDB_CREATE);
-        dbi_node = lmdb::dbi::open(txn, "quadrable_node", MDB_CREATE | MDB_INTEGERKEY);
+        dbi_nodesLeaf = lmdb::dbi::open(txn, "quadrable_nodesLeaf", MDB_CREATE | MDB_INTEGERKEY);
+        dbi_nodesInterior = lmdb::dbi::open(txn, "quadrable_nodesInterior", MDB_CREATE | MDB_INTEGERKEY);
         if (trackKeys) dbi_key = lmdb::dbi::open(txn, "quadrable_key", MDB_CREATE | MDB_INTEGERKEY);
     }
 

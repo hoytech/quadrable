@@ -9,12 +9,14 @@ bool getNode(lmdb::txn &txn, uint64_t nodeId, std::string_view &output) {
         if (it == memStore->nodes.end()) return false;
         output = it->second;
         return true;
+    } else if (nodeId >= firstInteriorNodeId) {
+        return dbi_nodesInterior.get(txn, lmdb::to_sv<uint64_t>(nodeId), output);
     } else {
-        return dbi_node.get(txn, lmdb::to_sv<uint64_t>(nodeId), output);
+        return dbi_nodesLeaf.get(txn, lmdb::to_sv<uint64_t>(nodeId), output);
     }
 }
 
-uint64_t writeNodeToDb(lmdb::txn &txn, std::string_view nodeRaw) {
+uint64_t writeNodeToDb(lmdb::txn &txn, std::string_view nodeRaw, bool isLeaf) {
     assert(nodeRaw.size() >= 40);
 
     uint64_t newNodeId;
@@ -28,41 +30,28 @@ uint64_t writeNodeToDb(lmdb::txn &txn, std::string_view nodeRaw) {
 
         memStore->nodes[newNodeId] = std::string(nodeRaw);
     } else {
-        newNodeId = getNextIntegerKey(txn, dbi_node);
+        uint64_t newNodeId = getNextId(txn, isLeaf);
 
-        dbi_node.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);
+        auto dbi = isLeaf ? dbi_nodesLeaf : dbi_nodesInterior;
+        dbi.put(txn, lmdb::to_sv<uint64_t>(newNodeId), nodeRaw);
+
+        assert(isLeaf || nodeRaw.size() == 48);
     }
 
     return newNodeId;
 }
 
-// Assertions
+uint64_t getNextId(lmdb::txn &txn, bool isLeaf) {
+    auto cursor = lmdb::cursor::open(txn, isLeaf ? dbi_nodesLeaf : dbi_nodesInterior);
+    std::string_view k, v;
+
+    if (cursor.get(k, v, MDB_LAST)) {
+        return lmdb::from_sv<uint64_t>(k) + 1;
+    } else {
+        return isLeaf ? 1 : firstInteriorNodeId;
+    }
+}
 
 void assertDepth(uint64_t depth) {
     assert(depth <= 255); // should only happen on hash collision (or a bug)
-}
-
-// Helper methods for LMDB:
-
-uint64_t getIntegerKeyOrZero(lmdb::cursor &cursor, MDB_cursor_op cursorOp = MDB_LAST) {
-    uint64_t id;
-
-    std::string_view k, v;
-
-    if (cursor.get(k, v, cursorOp)) {
-        id = lmdb::from_sv<uint64_t>(k);
-    } else {
-        id = 0;
-    }
-
-    return id;
-}
-
-uint64_t getNextIntegerKey(lmdb::txn &txn, lmdb::dbi &dbi) {
-    return getLargestIntegerKeyOrZero(txn, dbi) + 1;
-}
-
-uint64_t getLargestIntegerKeyOrZero(lmdb::txn &txn, lmdb::dbi &dbi) {
-    auto cursor = lmdb::cursor::open(txn, dbi);
-    return getIntegerKeyOrZero(cursor, MDB_LAST);
 }
