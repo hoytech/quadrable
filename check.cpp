@@ -145,8 +145,30 @@ void doTests() {
         });
     });
 
+    test("saves nodeId", [&]{
+        uint64_t nodeId = 999999;
 
+        db.change()
+          .put("A", "1", &nodeId)
+          .apply(txn);
 
+        verify(nodeId == db.getHeadNodeId(txn));
+        verify(Quadrable::ParsedNode(&db, txn, nodeId).leafVal() == "1");
+
+        uint64_t nodeId1 = 55555, nodeId2 = 44444, nodeId3 = 33333;
+
+        db.change()
+          .put("B", "2", &nodeId1)
+          .del("A")
+          .put("D", "4", &nodeId2)
+          .put("C", "3")
+          .put("E", "5", &nodeId3)
+          .apply(txn);
+
+        verify(Quadrable::ParsedNode(&db, txn, nodeId1).leafVal() == "2");
+        verify(Quadrable::ParsedNode(&db, txn, nodeId2).leafVal() == "4");
+        verify(Quadrable::ParsedNode(&db, txn, nodeId3).leafVal() == "5");
+    });
 
     test("integer round-trips", [&]{
         for (uint64_t i = 0; i < 100'000; i++) {

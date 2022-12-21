@@ -1120,7 +1120,7 @@ As long as you only use detached heads, you can get, put, import proofs, export 
 
 However, this is not the primary use-case for MemStore. Usually it is best used in conjunction with the DB, using read-only transactions. In this mode, it is possible to fork from a tree in the DB, make alterations, merge proofs, etc, all without needing to acquire the LMDB write lock. See the `"memStore forking from lmdb"` test for an example.
 
-Note that while MemStore nodes can refer to nodes in the DB, the opposite is not true and an error will be thrown if this is attempted.
+Note that while MemStore nodes can refer to nodes in LMDB, the opposite is not true and an error will be thrown if this is attempted.
 
 When you are finished with a MemStore, it can be destroyed like so:
 
@@ -1202,7 +1202,7 @@ The provider's code is simpler because it is stateless:
 
     std::string respsEncoded = quadrable::transport::encodeSyncResponses(resps);
 
-* The applications need to somehow ensure that the same `providerNodeId` is used in each call. Otherwise, exceptions will be thrown when the syncer calls `sync.addResps()`.
+* Applications need to somehow ensure that the same `providerNodeId` is used in each call. Otherwise, exceptions will be thrown when the syncer calls `sync.addResps()`.
 
 After the sync is complete, the syncer can either access the shadow tree directly by checking out the `sync.nodeIdShadow` node, or can use the `diff` method to extract the differences:
 

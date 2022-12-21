@@ -3,17 +3,21 @@ public:
 class UpdateSet {
   friend class Quadrable;
 
+  private:
+    UpdateSetMap map;
+    Quadrable *db;
+
   public:
     UpdateSet(Quadrable *db_) : db(db_) {}
 
-    UpdateSet &put(std::string_view key, std::string_view val) {
+    UpdateSet &put(std::string_view key, std::string_view val, uint64_t *outputNodeId = nullptr) {
         if (key.size() == 0) throw quaderr("zero-length keys not allowed");
-        map.insert_or_assign(Key::hash(key), Update{std::string(db->trackKeys ? key : ""), std::string(val), false});
+        map.insert_or_assign(Key::hash(key), Update{std::string(db->trackKeys ? key : ""), std::string(val), false, 0, outputNodeId});
         return *this;
     }
 
-    UpdateSet &put(const Key &keyRaw, std::string_view val) {
-        map.insert_or_assign(keyRaw, Update{"", std::string(val), false});
+    UpdateSet &put(const Key &keyRaw, std::string_view val, uint64_t *outputNodeId = nullptr) {
+        map.insert_or_assign(keyRaw, Update{"", std::string(val), false, 0, outputNodeId});
         return *this;
     }
 
@@ -43,9 +47,6 @@ class UpdateSet {
 
         if (pred(begin)) ++begin;
     };
-
-    UpdateSetMap map;
-    Quadrable *db;
 };
 
 
@@ -108,7 +109,9 @@ BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &upd
         }
 
         if (std::next(begin) == end) {
-            return BuiltNode::newLeaf(this, txn, begin);
+            auto b = BuiltNode::newLeaf(this, txn, begin);
+            if (begin->second.outputNodeId) *begin->second.outputNodeId = b.nodeId;
+            return b;
         }
     } else if (node.isLeaf()) {
         if (std::next(begin) == end && begin->first == node.leafKeyHash()) {
@@ -124,7 +127,9 @@ BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &upd
                 return BuiltNode::reuse(node);
             }
 
-            return BuiltNode::newLeaf(this, txn, begin);
+            auto b = BuiltNode::newLeaf(this, txn, begin);
+            if (begin->second.outputNodeId) *begin->second.outputNodeId = b.nodeId;
+            return b;
         }
 
         bool deleteThisLeaf = false;
