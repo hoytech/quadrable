@@ -12,23 +12,23 @@ class UpdateSet {
 
     UpdateSet &put(std::string_view key, std::string_view val, uint64_t *outputNodeId = nullptr) {
         if (key.size() == 0) throw quaderr("zero-length keys not allowed");
-        map.insert_or_assign(Key::hash(key), Update{std::string(db->trackKeys ? key : ""), std::string(val), false, 0, outputNodeId});
+        map.insert_or_assign(Key::hash(key), Update{std::string(db->trackKeys ? key : ""), std::string(val), false, outputNodeId});
         return *this;
     }
 
     UpdateSet &put(const Key &keyRaw, std::string_view val, uint64_t *outputNodeId = nullptr) {
-        map.insert_or_assign(keyRaw, Update{"", std::string(val), false, 0, outputNodeId});
+        map.insert_or_assign(keyRaw, Update{"", std::string(val), false, outputNodeId});
         return *this;
     }
 
-    UpdateSet &del(std::string_view key) {
+    UpdateSet &del(std::string_view key, uint64_t *outputNodeId = nullptr) {
         if (key.size() == 0) throw quaderr("zero-length keys not allowed");
-        map.insert_or_assign(Key::hash(key), Update{std::string(key), "", true});
+        map.insert_or_assign(Key::hash(key), Update{std::string(key), "", true, outputNodeId});
         return *this;
     }
 
-    UpdateSet &del(const Key &keyRaw) {
-        map.insert_or_assign(keyRaw, Update{"", "", true});
+    UpdateSet &del(const Key &keyRaw, uint64_t *outputNodeId = nullptr) {
+        map.insert_or_assign(keyRaw, Update{"", "", true, outputNodeId});
         return *this;
     }
 
@@ -65,6 +65,10 @@ void apply(lmdb::txn &txn, UpdateSet *updatesOrig) {
 void apply(lmdb::txn &txn, UpdateSet &updatesOrig) {
     // If exception is thrown, updatesOrig could be in inconsistent state, so ensure it's cleared by moving from it
     UpdateSet updates = std::move(updatesOrig);
+
+    for (auto &u : updates.map) {
+        if (u.second.outputNodeId) *u.second.outputNodeId = 0;
+    }
 
     uint64_t oldNodeId = getHeadNodeId(txn);
 
@@ -119,11 +123,13 @@ BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &upd
 
             if (begin->second.deletion) {
                 bubbleUp = true;
+                if (begin->second.outputNodeId) *begin->second.outputNodeId = node.nodeId;
                 return BuiltNode::empty();
             }
 
             if (deleteRightSide || (node.nodeType == NodeType::Leaf && begin->second.val == node.leafVal())) {
                 // No change to this leaf, so do nothing. Don't do this for WitnessLeaf nodes, since we need to upgrade them to leaves.
+                if (begin->second.outputNodeId) *begin->second.outputNodeId = node.nodeId;
                 return BuiltNode::reuse(node);
             }
 
@@ -136,7 +142,10 @@ BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &upd
 
         updates.eraseRange(begin, end, [&](UpdateSetMap::iterator &u){
             if (u->second.deletion) {
-                if (u->first == node.leafKeyHash()) deleteThisLeaf = true;
+                if (u->first == node.leafKeyHash()) {
+                    deleteThisLeaf = true;
+                    if (u->second.outputNodeId) *u->second.outputNodeId = node.nodeId;
+                }
                 checkBubble = true; // so we check the status of this node after handling any changes further down (may require bubbling up)
             }
             return u->second.deletion;
@@ -156,7 +165,7 @@ BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &upd
 
         if (!deleteThisLeaf) {
             // emplace() ensures that we don't overwrite any updates to this leaf already in the UpdateSet.
-            auto emplaceRes = updates.map.emplace(Key::existing(node.leafKeyHash()), Update{"", "", false, node.nodeId});
+            auto emplaceRes = updates.map.emplace(Key::existing(node.leafKeyHash()), Update{"", "", false, nullptr, node.nodeId});
 
             // If we did insert it, and it went before the start of our iterator window, back up our iterator to include it.
             //   * This happens when the leaf we are splitting is to the left of the leaf we are adding.

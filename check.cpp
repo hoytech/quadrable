@@ -152,22 +152,39 @@ void doTests() {
           .put("A", "1", &nodeId)
           .apply(txn);
 
-        verify(nodeId == db.getHeadNodeId(txn));
+        uint64_t origHead = db.getHeadNodeId(txn);
+
+        verify(nodeId == origHead);
         verify(Quadrable::ParsedNode(&db, txn, nodeId).leafVal() == "1");
 
         uint64_t nodeId1 = 55555, nodeId2 = 44444, nodeId3 = 33333;
+        uint64_t nodeIdDel1 = 8888, nodeIdDel2 = 7777;
 
         db.change()
+          .del("A", &nodeIdDel1)
           .put("B", "2", &nodeId1)
-          .del("A")
           .put("D", "4", &nodeId2)
           .put("C", "3")
           .put("E", "5", &nodeId3)
+          .del("NONE", &nodeIdDel2)
           .apply(txn);
 
         verify(Quadrable::ParsedNode(&db, txn, nodeId1).leafVal() == "2");
         verify(Quadrable::ParsedNode(&db, txn, nodeId2).leafVal() == "4");
         verify(Quadrable::ParsedNode(&db, txn, nodeId3).leafVal() == "5");
+
+        verify(nodeIdDel1 == origHead);
+        verify(nodeIdDel2 == 0);
+
+        // Unchanged leaf:
+
+        uint64_t nodeIdDup;
+
+        db.change()
+          .put("B", "2", &nodeIdDup)
+          .apply(txn);
+
+        verify(nodeIdDup == nodeId1);
     });
 
     test("integer round-trips", [&]{

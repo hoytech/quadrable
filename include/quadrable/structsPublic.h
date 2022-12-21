@@ -22,8 +22,8 @@ struct Update {
     std::string key; // only used if trackKeys is set
     std::string val;
     bool deletion;
-    uint64_t nodeId = 0; // when a leaf is split, a special-case Update is created with this set
     uint64_t *outputNodeId = nullptr; // if non-null, write out a newly created node's id here
+    uint64_t nodeId = 0; // when a leaf is split, a special-case Update is created with this set
 };
 
 using UpdateSetMap = std::map<Key, Update>;
