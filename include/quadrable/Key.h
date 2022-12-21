@@ -32,6 +32,8 @@ class Hash {
 
 class Key {
   public:
+    uint8_t data[32];
+
     Key() {};
 
     static Key hash(std::string_view s) {
@@ -98,6 +100,15 @@ class Key {
         return h;
     }
 
+    static Key fromIntegerAndHash(uint64_t n, std::string_view hash) {
+        Key k = fromInteger(n);
+
+        if (hash.size() != 23) throw quaderr("truncated hash should be 23 bytes");
+        memcpy(k.data + 9, hash.data(), 23);
+
+        return k;
+    }
+
     uint64_t toInteger() {
         if (std::any_of(data + 16, data + sizeof(data), [](uint8_t c){ return c != 0; })) throw quaderr("hash is not in integer format");
 
@@ -152,8 +163,6 @@ class Key {
         size_t remaining = 32 - (n / 8);
         if (remaining) memset(data + (n/8) + 1, '\0', remaining - 1);
     }
-
-    uint8_t data[32];
 };
 
 inline bool operator <(const Key &h1, const Key &h2) {
