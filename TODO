@@ -18,6 +18,7 @@ bugs
   ? resource limits on proof sizes when verifying (setMaxProofCmds?)
 
 opt
+  ? is there a way to avoid free()ing the std::map entries in putAux, so it can be free()d later, after LMDB write-lock released?
   ? tree compaction to ensure nodeIds are sequential
   ? flatmaps instead of std::map, ie in the update change-set
 
