@@ -129,7 +129,6 @@ BuiltNode putAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, UpdateSet &upd
 
             if (deleteRightSide || (node.nodeType == NodeType::Leaf && begin->second.val == node.leafVal())) {
                 // No change to this leaf, so do nothing. Don't do this for WitnessLeaf nodes, since we need to upgrade them to leaves.
-                if (begin->second.outputNodeId) *begin->second.outputNodeId = node.nodeId;
                 return BuiltNode::reuse(node);
             }
 

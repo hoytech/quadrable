@@ -1055,7 +1055,7 @@ In this case, all the modifications will be made with a single traversal of the 
 
 You can update a key multiple times within the same UpdateSet. The latest update will overwrite the previous updates. This can allow replaying modifications from some sort of log without needing to rebuild the merkle tree as you go. The hashing will only get done when you finally apply it.
 
-An optional `uint64_t*` argument to `put` and `del` can be used to get the nodeId of the node that was created or deleted. If no leaf was added because there was already an identical leaf in the tree, then the original node's nodeId is returned. If no node was deleted because no leaf with that key existed, 0 is returned:
+An optional `uint64_t*` argument to `put` and `del` can be used to get the nodeId of the node that was created or deleted. If no leaf was added because there was already an identical leaf in the tree, then `0` is returned. Similarly, if no node was deleted because a leaf with that key did not exist, `0` is returned:
 
     uint64_t nodeIdNew, nodeIdDel;
 

@@ -152,10 +152,35 @@ void doTests() {
           .put("A", "1", &nodeId)
           .apply(txn);
 
+        verify(nodeId != 0);
+        verify(nodeId == db.getHeadNodeId(txn));
+        verify(Quadrable::ParsedNode(&db, txn, nodeId).leafVal() == "1");
+
+        // Puting identical leaf returns 0
+
+        nodeId = 999999;
+
+        db.change()
+          .put("A", "1", &nodeId)
+          .apply(txn);
+
+        verify(nodeId == 0);
+
+        // Puting new leaf with same key but different value returns non-0
+
+        nodeId = 999999;
+
+        db.change()
+          .put("A", "2", &nodeId)
+          .apply(txn);
+
+        verify(nodeId != 0);
+        verify(nodeId == db.getHeadNodeId(txn));
+
         uint64_t origHead = db.getHeadNodeId(txn);
 
-        verify(nodeId == origHead);
-        verify(Quadrable::ParsedNode(&db, txn, nodeId).leafVal() == "1");
+
+        // Deletions, etc
 
         uint64_t nodeId1 = 55555, nodeId2 = 44444, nodeId3 = 33333;
         uint64_t nodeIdDel1 = 8888, nodeIdDel2 = 7777;
@@ -184,7 +209,7 @@ void doTests() {
           .put("B", "2", &nodeIdDup)
           .apply(txn);
 
-        verify(nodeIdDup == nodeId1);
+        verify(nodeIdDup == 0);
     });
 
     test("integer round-trips", [&]{
