@@ -638,6 +638,54 @@ void doTests() {
     });
 
 
+    test("re-use leafs", [&]{
+        // Setup a simple tree
+
+        {
+            auto changes = db.change();
+            for (int i=0; i<10; i++) {
+                std::string s = std::to_string(i);
+                changes.put(quadrable::Key::fromInteger(i), std::string("N = ") + s);
+            }
+            changes.apply(txn);
+        }
+
+        uint64_t origHeadNodeId = db.getHeadNodeId(txn);
+        auto origRoot = db.root(txn);
+
+        // Get the nodeId for one of the leafs to test later
+
+        uint64_t sampleLeafNodeId = 99999999;
+
+        {
+            std::string_view val;
+            db.getRaw(txn, quadrable::Key::fromInteger(6).str(), val, &sampleLeafNodeId);
+        }
+
+        // Build up a change-set that reuses all the leafs
+
+        auto changes = db.change();
+
+        auto it = db.iterate(txn, quadrable::Key::null());
+
+        uint64_t newSampleNodeId = 0;
+
+        while (!it.atEnd()) {
+            changes.putReuse(txn, it.get().nodeId, it.get().key().toInteger() == 6 ? &newSampleNodeId : nullptr);
+            it.next();
+        }
+
+        // Checkout a new tree and apply the changeset
+
+        db.checkout();
+        changes.apply(txn);
+
+        // Roots are equal but node ids aren't
+
+        verify(db.root(txn) == origRoot);
+        verify(db.getHeadNodeId(txn) != origHeadNodeId);
+        verify(newSampleNodeId == sampleLeafNodeId);
+    });
 
 
     test("basic proof", [&]{

@@ -21,6 +21,18 @@ class UpdateSet {
         return *this;
     }
 
+    UpdateSet &putReuse(const Key &keyRaw, uint64_t nodeId, uint64_t *outputNodeId = nullptr) {
+        map.insert_or_assign(keyRaw, Update{"", "", false, outputNodeId, nodeId});
+        return *this;
+    }
+
+    UpdateSet &putReuse(lmdb::txn &txn, uint64_t nodeId, uint64_t *outputNodeId = nullptr) {
+        ParsedNode node(db, txn, nodeId);
+        if (!node.isLeaf()) throw quaderr("trying to reuse a non-leaf");
+        putReuse(node.key(), nodeId, outputNodeId);
+        return *this;
+    }
+
     UpdateSet &del(std::string_view key, uint64_t *outputNodeId = nullptr) {
         if (key.size() == 0) throw quaderr("zero-length keys not allowed");
         map.insert_or_assign(Key::hash(key), Update{std::string(key), "", true, outputNodeId});

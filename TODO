@@ -12,6 +12,7 @@ docs
   graphs of sync benchmarks
 
 bugs
+  !? iterator bug with hashed keys
   exporting proof of 0 keys should return a root witness
   in garbage collection, never collect the highest-ID node in the DB, to prevent ID re-use
   ? clean-up key/keyHash terminology

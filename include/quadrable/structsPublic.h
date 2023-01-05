@@ -23,7 +23,7 @@ struct Update {
     std::string val;
     bool deletion;
     uint64_t *outputNodeId = nullptr; // if non-null, write out a newly created node's id here
-    uint64_t nodeId = 0; // when a leaf is split, a special-case Update is created with this set
+    uint64_t nodeIdOverride = 0; // To force re-use of a node. Also, when a leaf is split, a special-case Update is created with this
 };
 
 using UpdateSetMap = std::map<Key, Update>;
@@ -33,6 +33,7 @@ using UpdateSetMap = std::map<Key, Update>;
 struct GetMultiResult {
     bool exists;
     std::string_view val;
+    uint64_t nodeId;
 };
 
 using GetMultiQuery = std::map<std::string, GetMultiResult>;

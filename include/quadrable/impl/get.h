@@ -2,7 +2,7 @@ public:
 
 using GetMultiInternalMap = std::map<Key, GetMultiResult &>;
 
-bool get(lmdb::txn &txn, const std::string_view key, std::string_view &val) {
+bool get(lmdb::txn &txn, const std::string_view key, std::string_view &val, uint64_t *outputNodeId = nullptr) {
     GetMultiQuery query;
 
     auto rec = query.emplace(key, GetMultiResult{});
@@ -11,13 +11,15 @@ bool get(lmdb::txn &txn, const std::string_view key, std::string_view &val) {
 
     if (rec.first->second.exists) {
         val = rec.first->second.val;
+        if (outputNodeId) *outputNodeId = rec.first->second.nodeId;
         return true;
     }
 
+    if (outputNodeId) *outputNodeId = 0;
     return false;
 }
 
-bool getRaw(lmdb::txn &txn, const std::string_view key, std::string_view &val) {
+bool getRaw(lmdb::txn &txn, const std::string_view key, std::string_view &val, uint64_t *outputNodeId = nullptr) {
     GetMultiQuery query;
 
     auto rec = query.emplace(key, GetMultiResult{});
@@ -26,9 +28,11 @@ bool getRaw(lmdb::txn &txn, const std::string_view key, std::string_view &val) {
 
     if (rec.first->second.exists) {
         val = rec.first->second.val;
+        if (outputNodeId) *outputNodeId = rec.first->second.nodeId;
         return true;
     }
 
+    if (outputNodeId) *outputNodeId = 0;
     return false;
 }
 
@@ -90,6 +94,7 @@ void getMultiAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, GetMultiIntern
                 if (node.nodeType == NodeType::WitnessLeaf) throw quaderr("encountered witness node: incomplete tree");
                 i->second.exists = true;
                 i->second.val = node.leafVal();
+                i->second.nodeId = node.nodeId;
             } else {
                 i->second.exists = false;
             }

@@ -53,8 +53,10 @@ class BuiltNode {
     }
 
     static BuiltNode newLeaf(Quadrable *db, lmdb::txn &txn, UpdateSetMap::iterator it) {
-        if (it->second.nodeId != 0) {
-            ParsedNode node(db, txn, it->second.nodeId);
+        if (it->second.nodeIdOverride != 0) {
+            ParsedNode node(db, txn, it->second.nodeIdOverride);
+            if (!node.isLeaf()) throw quaderr("trying to reuse a non-leaf node as a leaf");
+            if (it->first != node.leafKeyHash()) throw quaderr("non-matching leaf key when re-using leaf node");
             return reuse(node);
         }
 
