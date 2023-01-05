@@ -494,7 +494,8 @@ When syncing, there is a trade-off between bandwith and round-trips. In the dege
 
 At the other end of the spectrum, each request could specify a depth limit of 1. A larger depth limit results in transferring unnecessary witnesses, but reduces the number of round-trips needed. But since witnesses are small, it makes sense to speculatively pre-load witnesses in the event they are needed. By default the depth limits for both the initial and later requests are set to `4`, but these can be changed:
 
-    Quadrable::Sync sync(&db, txn, origNodeId);
+    Quadrable::Sync sync(&db);
+    sync.init(txn, origNodeId);
     sync.initialDepthLimit = 6;
     sync.laterDepthLimit = 5;
 
@@ -1185,7 +1186,8 @@ The `Sync` class is a stateful coordinator that implements the [syncing algorith
 
 The syncer's code might look something like this:
 
-    Quadrable::Sync sync(&db, txn, syncerNodeId);
+    Quadrable::Sync sync(&db);
+    sync.init(txn, syncerNodeId);
 
     while (1) {
         auto reqs = sync.getReqs(txn);

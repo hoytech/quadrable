@@ -83,7 +83,8 @@ void doIt() {
         uint64_t newNodeId = db.getHeadNodeId(txn);
         auto newKey = db.rootKey(txn);
 
-        Quadrable::Sync sync(&db, txn, origNodeId);
+        Quadrable::Sync sync(&db);
+        sync.init(txn, origNodeId);
 
         uint64_t bytesDown = 0;
         uint64_t bytesUp = 0;

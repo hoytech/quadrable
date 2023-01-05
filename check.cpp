@@ -1448,7 +1448,8 @@ void doTests() {
             uint64_t newNodeId = db.getHeadNodeId(txn);
             auto newKey = db.rootKey(txn);
 
-            Quadrable::Sync sync(&db, txn, origNodeId);
+            Quadrable::Sync sync(&db);
+            sync.init(txn, origNodeId);
 
             db.addMemStore();
             db.writeToMemStore = true;

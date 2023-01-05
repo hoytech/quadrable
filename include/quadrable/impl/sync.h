@@ -30,7 +30,7 @@ using SyncedDiffCb = std::function<void(DiffType, const ParsedNode &)>;
 class Sync {
   public:
     Quadrable *db;
-    uint64_t nodeIdLocal;
+    uint64_t nodeIdLocal = std::numeric_limits<uint64_t>::max();
     uint64_t nodeIdShadow;
     uint64_t initialDepthLimit = 4;
     uint64_t laterDepthLimit = 4;
@@ -40,12 +40,18 @@ class Sync {
     std::unordered_set<uint64_t> finishedNodes;
 
   public:
-    Sync(Quadrable *db_, lmdb::txn &txn, uint64_t nodeIdLocal_) : db(db_), nodeIdLocal(nodeIdLocal_) {
+    Sync(Quadrable *db_) : db(db_) {}
+
+    void init(lmdb::txn &txn, uint64_t nodeIdLocal_) {
+        if (nodeIdLocal != std::numeric_limits<uint64_t>::max()) throw quaderr("Sync already init'ed");
+        nodeIdLocal = nodeIdLocal_;
         auto node = BuiltNode::newWitness(db, txn, Key::null()); // initial stub node
         nodeIdShadow = node.nodeId;
     }
 
     SyncRequests getReqs(lmdb::txn &txn, uint64_t bytesBudget = std::numeric_limits<uint64_t>::max()) {
+        if (nodeIdLocal == std::numeric_limits<uint64_t>::max()) throw quaderr("Sync not yet init'ed");
+
         if (bytesBudget == 0) throw quaderr("bytesBudget can't be 0");
 
         if (!inited) {
