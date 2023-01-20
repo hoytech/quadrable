@@ -192,7 +192,7 @@ void exportProofRangeAux(lmdb::txn &txn, uint64_t depth, uint64_t nodeId, uint64
         std::string_view leafKey;
         getLeafKey(txn, node.nodeId, leafKey);
 
-        if (expandLeaves) {
+        if (expandLeaves || node.leafVal().size() <= 32) {
             items.emplace_back(ProofGenItem{
                 nodeId,
                 parentNodeId,

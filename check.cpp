@@ -1421,7 +1421,7 @@ void doTests() {
                 auto c = db.change();
                 for (uint64_t i = 0; i < numElems; i++) {
                     auto n = rnd() % maxElem;
-                    c.put(quadrable::Key::fromInteger(n), std::to_string(n));
+                    c.put(quadrable::Key::fromInteger(n), std::to_string(n) + std::string(rnd() % 60, 'A'));
                 }
                 c.apply(txn);
             }
