@@ -136,11 +136,14 @@ class Sync {
         }
     }
 
-    void reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, uint64_t &bytesBudget, SyncRequests &output) {
+    bool reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, uint64_t &bytesBudget, SyncRequests &output) {
         ParsedNode nodeOurs(db, txn, nodeIdOurs);
         ParsedNode nodeTheirs(db, txn, nodeIdTheirs);
 
-        if (nodeOurs.nodeHash() == nodeTheirs.nodeHash() || finishedNodes.count(nodeIdOurs) || bytesBudget == 0) return;
+        if (nodeOurs.nodeHash() == nodeTheirs.nodeHash() || finishedNodes.count(nodeIdOurs)) return true;
+        if (!bytesBudget) return false;
+
+        bool ret = true;
 
         auto reduceBytesBudget = [&]{
             uint64_t estimate = 16;
@@ -149,14 +152,13 @@ class Sync {
         };
 
         if (nodeTheirs.isBranch()) {
-            uint64_t outputSizeBefore = output.size();
-
-            reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.leftNodeId : nodeIdOurs, nodeTheirs.leftNodeId, depth+1, currPath, bytesBudget, output);
+            bool leftRet = reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.leftNodeId : nodeIdOurs, nodeTheirs.leftNodeId, depth+1, currPath, bytesBudget, output);
             currPath.setBit(depth, 1);
-            reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.rightNodeId : nodeIdOurs, nodeTheirs.rightNodeId, depth+1, currPath, bytesBudget, output);
+            bool rightRet = reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.rightNodeId : nodeIdOurs, nodeTheirs.rightNodeId, depth+1, currPath, bytesBudget, output);
             currPath.setBit(depth, 0);
 
-            if (output.size() == outputSizeBefore && nodeIdOurs) finishedNodes.insert(nodeIdOurs);
+            ret = leftRet && rightRet;
+            if (ret && nodeOurs.isBranch()) finishedNodes.insert(nodeIdOurs);
         } else if (nodeTheirs.isWitnessLeaf()) {
             output.emplace_back(SyncRequest{
                 currPath,
@@ -166,6 +168,7 @@ class Sync {
             });
 
             reduceBytesBudget();
+            ret = false;
         } else if (nodeTheirs.isWitness()) {
             output.emplace_back(SyncRequest{
                 currPath,
@@ -175,9 +178,11 @@ class Sync {
             });
 
             reduceBytesBudget();
+            ret = false;
         }
-    }
 
+        return ret;
+    }
 };
 
 
