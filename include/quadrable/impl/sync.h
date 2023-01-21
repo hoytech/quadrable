@@ -38,6 +38,7 @@ class Sync {
   private:
     bool inited = false;
     std::unordered_set<uint64_t> finishedNodes;
+    std::unordered_set<uint64_t> diffedNodes;
 
   public:
     Sync(Quadrable *db_) : db(db_) {}
@@ -49,7 +50,7 @@ class Sync {
         nodeIdShadow = node.nodeId;
     }
 
-    SyncRequests getReqs(lmdb::txn &txn, uint64_t bytesBudget = std::numeric_limits<uint64_t>::max()) {
+    SyncRequests getReqs(lmdb::txn &txn, uint64_t bytesBudget = std::numeric_limits<uint64_t>::max(), std::optional<SyncedDiffCb> cb = std::nullopt) {
         if (nodeIdLocal == std::numeric_limits<uint64_t>::max()) throw quaderr("Sync not yet init'ed");
 
         if (bytesBudget == 0) throw quaderr("bytesBudget can't be 0");
@@ -67,7 +68,7 @@ class Sync {
 
         Key currPath = Key::null();
 
-        reconcileTrees(txn, nodeIdLocal, nodeIdShadow, 0, currPath, bytesBudget, output);
+        reconcileTrees(txn, nodeIdLocal, nodeIdShadow, 0, currPath, bytesBudget, output, cb);
 
         return output;
     }
@@ -81,11 +82,16 @@ class Sync {
         nodeIdShadow = newNodeShadow.nodeId;
     }
 
+    void diffReset() {
+        diffedNodes.clear();
+    }
+
     void diff(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, const SyncedDiffCb &cb) {
         ParsedNode nodeOurs(db, txn, nodeIdOurs);
         ParsedNode nodeTheirs(db, txn, nodeIdTheirs);
 
         if (nodeOurs.nodeHash() == nodeTheirs.nodeHash()) return;
+        if (diffedNodes.count(nodeIdOurs)) return;
 
         if (nodeOurs.isBranch() && nodeTheirs.isBranch()) {
             diff(txn, nodeOurs.leftNodeId, nodeTheirs.leftNodeId, cb);
@@ -136,7 +142,7 @@ class Sync {
         }
     }
 
-    bool reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, uint64_t &bytesBudget, SyncRequests &output) {
+    bool reconcileTrees(lmdb::txn &txn, uint64_t nodeIdOurs, uint64_t nodeIdTheirs, uint64_t depth, Key &currPath, uint64_t &bytesBudget, SyncRequests &output, std::optional<SyncedDiffCb> cb = std::nullopt) {
         ParsedNode nodeOurs(db, txn, nodeIdOurs);
         ParsedNode nodeTheirs(db, txn, nodeIdTheirs);
 
@@ -152,9 +158,9 @@ class Sync {
         };
 
         if (nodeTheirs.isBranch()) {
-            bool leftRet = reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.leftNodeId : nodeIdOurs, nodeTheirs.leftNodeId, depth+1, currPath, bytesBudget, output);
+            bool leftRet = reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.leftNodeId : nodeIdOurs, nodeTheirs.leftNodeId, depth+1, currPath, bytesBudget, output, cb);
             currPath.setBit(depth, 1);
-            bool rightRet = reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.rightNodeId : nodeIdOurs, nodeTheirs.rightNodeId, depth+1, currPath, bytesBudget, output);
+            bool rightRet = reconcileTrees(txn, nodeOurs.isBranch() ? nodeOurs.rightNodeId : nodeIdOurs, nodeTheirs.rightNodeId, depth+1, currPath, bytesBudget, output, cb);
             currPath.setBit(depth, 0);
 
             ret = leftRet && rightRet;
@@ -179,6 +185,11 @@ class Sync {
 
             reduceBytesBudget();
             ret = false;
+        }
+
+        if (ret && cb && ((nodeOurs.isBranch() && nodeTheirs.isBranch()) || depth == 0)) {
+            diff(txn, nodeIdOurs, nodeIdTheirs, *cb);
+            diffedNodes.insert(nodeIdOurs);
         }
 
         return ret;

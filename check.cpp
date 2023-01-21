@@ -1410,10 +1410,10 @@ void doTests() {
         std::mt19937 rnd;
         rnd.seed(0);
 
-        for (uint trialIter = 0; trialIter < 100; trialIter++) {
-            uint64_t numElems = 500;
+        for (uint trialIter = 0; trialIter < 500; trialIter++) {
+            uint64_t numElems = rnd() % 800;
             uint64_t maxElem = 1000;
-            uint64_t numAlterations = 100;
+            uint64_t numAlterations = rnd() % 200;
 
             db.checkout();
 
@@ -1454,11 +1454,18 @@ void doTests() {
             db.addMemStore();
             db.writeToMemStore = true;
 
+            std::vector<uint64_t> nodeIdsSeenDuringScan;
+            std::vector<uint64_t> nodeIdsSeenDuringDiff;
+
+            auto cb = [&](auto dt, const auto &node){
+                nodeIdsSeenDuringScan.push_back(node.nodeId);
+            };
+
             while(1) {
-                auto reqs = syncRequestsRoundtrip(sync.getReqs(txn));
+                auto reqs = syncRequestsRoundtrip(sync.getReqs(txn, (rnd() % 1000) + 100, cb));
                 if (reqs.size() == 0) break;
 
-                auto resps = syncResponsesRoundtrip(db.handleSyncRequests(txn, newNodeId, reqs));
+                auto resps = syncResponsesRoundtrip(db.handleSyncRequests(txn, newNodeId, reqs, (rnd() % 10000) + 2000));
                 sync.addResps(txn, reqs, resps);
             }
 
@@ -1473,7 +1480,10 @@ void doTests() {
             {
                 auto chg = db.change();
 
+                sync.diffReset();
                 sync.diff(txn, origNodeId, sync.nodeIdShadow, [&](auto dt, const auto &node){
+                    nodeIdsSeenDuringDiff.push_back(node.nodeId);
+
                     if (dt == Quadrable::DiffType::Added) {
                         chg.put(node.key(), node.leafVal());
                     } else if (dt == Quadrable::DiffType::Changed) {
@@ -1491,6 +1501,10 @@ void doTests() {
             verify(reconstructedKey == newKey);
 
             db.removeMemStore();
+
+            std::sort(nodeIdsSeenDuringScan.begin(), nodeIdsSeenDuringScan.end());
+            std::sort(nodeIdsSeenDuringDiff.begin(), nodeIdsSeenDuringDiff.end());
+            verify(nodeIdsSeenDuringDiff == nodeIdsSeenDuringScan);
         }
     });
 
