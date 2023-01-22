@@ -52,6 +52,8 @@ void diffAux(lmdb::txn &txn, uint64_t nodeIdA, uint64_t nodeIdB, std::vector<Dif
     ParsedNode nodeA(this, txn, nodeIdA);
     ParsedNode nodeB(this, txn, nodeIdB);
 
+    if (nodeA.nodeHash() == nodeB.nodeHash()) return;
+
     if (nodeA.isWitnessAny() || nodeB.isWitnessAny()) throw quaderr("encountered witness during diff");
 
     if (nodeA.isBranch() && nodeB.isBranch()) {
