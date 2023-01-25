@@ -103,8 +103,8 @@ class Key {
     static Key fromIntegerAndHash(uint64_t n, std::string_view hash) {
         Key k = fromInteger(n);
 
-        if (hash.size() != 23) throw quaderr("truncated hash should be 23 bytes");
-        memcpy(k.data + 9, hash.data(), 23);
+        if (hash.size() < 23 || hash.size() > 31) throw quaderr("truncated hash should be 23-31 bytes");
+        memcpy(k.data + (32 - hash.size()), hash.data(), hash.size());
 
         return k;
     }
