@@ -31,7 +31,7 @@ class GarbageCollector {
         uint64_t collected = 0;
     };
 
-    Stats sweep(lmdb::txn &txn) {
+    Stats sweep(lmdb::txn &txn, std::optional<std::function<bool(uint64_t)>> cb = std::nullopt) {
         Stats stats;
 
         std::string_view k, v;
@@ -41,9 +41,9 @@ class GarbageCollector {
             for (bool found = cursor.get(k, v, MDB_FIRST); found; found = cursor.get(k, v, MDB_NEXT)) {
                 stats.total++;
                 uint64_t nodeId = lmdb::from_sv<uint64_t>(k);
-                if (markedNodes.find(nodeId) == markedNodes.end()) {
+                if (markedNodes.find(nodeId) == markedNodes.end() && (!cb || (*cb)(nodeId))) {
                     cursor.del();
-                    db.dbi_key.del(txn, lmdb::to_sv<uint64_t>(nodeId));
+                    if (db.trackKeys) db.dbi_key.del(txn, lmdb::to_sv<uint64_t>(nodeId));
                     stats.collected++;
                 }
             }
