@@ -364,7 +364,9 @@ void run(int argc, char **argv) {
 
         auto stats = gc.sweep(txn);
 
-        std::cout << "Collected " << stats.collected << "/" << stats.total << " nodes" << std::endl;
+        std::cout << "Collected " << stats.garbage << "/" << stats.total << " nodes" << std::endl;
+
+        gc.deleteNodes(txn);
     } else if (args["exportProof"].asBool()) {
         quadrable::Proof proof;
 

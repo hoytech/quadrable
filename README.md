@@ -1233,7 +1233,8 @@ After the sync is complete, the syncer can either access the shadow tree directl
 The `GarbageCollector` class can be used to deallocate unneeded nodes. See the implementation of [quadb gc](quadb-gc) in `quadb.cpp`.
 
 * `gc.markAllHeads()` will mark all the heads stored in the `quadrable_head` table. But if you have other roots stored you would like to preserve you can mark them with `gc.markTree()`. Both of these methods can be called inside a read-only transaction.
-* When you are done marking nodes, call `gc.sweep()`. This must be done inside a read-write transaction. All nodes that weren't found during the mark phase are deleted.
+* When you are done marking nodes, call `gc.sweep()`. This function traverses all the nodes in the DB and builds up a set of nodes to delete. This can also be done inside a read-only transaction (can be the same transaction as the marking).
+* Finally, call `gc.deleteNodes()`. This will actually delete all the detected garbage nodes. It must be done in a read-write transaction.
 
 
 
