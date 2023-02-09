@@ -14,6 +14,7 @@
 #include <iterator>
 #include <algorithm>
 #include <functional>
+#include <optional>
 
 #include "lmdbxx/lmdb++.h"
 
